@@ -1,0 +1,23 @@
+// Toggled in and out by tests/run-checks.sh as src/stub.test.ts.
+// Every line below is something gate.sh must refuse. Keep it disabled by
+// default so the clean-fixture check can pass.
+import { describe, it, expect, assert } from 'vitest'
+
+describe('stubs the gate must catch', () => {
+  it('asserts nothing at all', () => {
+    expect(true)
+  })
+
+  it('asserts nothing via assert', () => {
+    assert.ok(true)
+  })
+
+  it.skip('is skipped', () => {
+    expect(1).toBe(1)
+  })
+
+  it.todo('is a todo')
+
+  it('has an empty body', () => {
+  })
+})

@@ -63,17 +63,17 @@ changed_files() {
   } | sort -u
 }
 
-is_test_path() {
-  case "$1" in
-    *.test.*|*.spec.*|*/__tests__/*|test/*|tests/*|*/test/*|*/tests/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+# A test file is one a runner would actually load. The extension must END the
+# name — `.test.ts.bak` and `.test.ts.orig` from a merge are not test files,
+# and scanning them produces failures nobody can fix.
+TEST_RE='\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$'
+
+is_test_path() { printf '%s' "$1" | grep -qE "$TEST_RE"; }
 
 TEST_FILES=""
 if [ "${TG_SCAN:-}" = "all" ]; then
-  TEST_FILES=$(find . -type d -name node_modules -prune -o \
-                    -type f \( -name '*.test.*' -o -name '*.spec.*' \) -print 2>/dev/null | sort)
+  TEST_FILES=$(find . -type d -name node_modules -prune -o -type f -print 2>/dev/null \
+               | grep -E "$TEST_RE" | sort)
 else
   while IFS= read -r f; do
     [ -n "$f" ] || continue
