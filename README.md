@@ -99,13 +99,14 @@ their frontmatter.
 | coverage diff | `hooks/gate.sh` |
 | stub-test detection | `hooks/gate.sh` |
 | retry limit | `hooks/retry-guard.sh` |
-| worktree isolation | Lead, one worktree per executor |
+| worktree isolation | orchestrator, one worktree per executor |
 | gate enforced on subagent exit | `hooks/subagent-gate.sh` via `SubagentStop` |
 
 `subagent-gate.sh` is registered in `~/.claude/settings.json` under
 `SubagentStop`. It is inert unless a `.tg-active` marker file sits in the cwd —
-Lead creates it when a FULL run opens and removes it after sign-off. No marker,
-no effect: every other workflow on this machine is untouched. When it is armed
+the orchestrator creates it when a FULL run opens and removes it after
+sign-off. No marker, no effect: every other workflow on this machine is
+untouched, including OMC's. When it is armed
 and the gate fails, it exits 2, which blocks the subagent from reporting done
 and feeds it the failure. `stop_hook_active` short-circuits the second block so
 a subagent can never be trapped in a loop.
@@ -124,19 +125,19 @@ deterministic check.
 Permanent. Every node inherits it.
 
 - **Fast path: ≤15 tool calls.** Full path: **≤60 per feature**, everyone's
-  calls included. Lead keeps the ledger in `tasks.md` and stops at 60 — a
-  partial `report.md` with the rest in Blockers, never a silent overrun.
+  calls included. The orchestrator keeps the ledger in `tasks.md` and stops at
+  60 — a partial `report.md` with the rest in Blockers, never a silent overrun.
 - **Per-node budgets are ceilings, not allowances**, and they deliberately do
   not sum to 60:
 
   | router | pm | pjm | lead | executor | tester | retro |
   |---|---|---|---|---|---|---|
-  | 4 | 10 | 8 | 20 | 15 ×task ×attempt | 12 ×task ×attempt | 5 |
+  | 4 (+orchestration) | 10 | 8 | 12 | 15 ×task ×attempt | 12 ×task ×attempt | 5 |
 
   A 2-task feature at every ceiling would spend ~100. No run may spend every
   ceiling. Roughly `20 + 27×tasks` is the realistic projection — over 60 means
-  Lead asks Irfan to raise the cap or cut scope **before** the first worktree,
-  not after.
+  the orchestrator asks Irfan to raise the cap or cut scope **before** the
+  first worktree, not after.
 - **Router must HAND-BACK when manual is faster.** Under ~5 minutes of human
   work, or too ambiguous to triage — one line, then stop. Running the graph on
   a typo is the most expensive failure mode there is.
