@@ -60,6 +60,16 @@ Mark deliberate shortcuts with a `ponytail:` comment naming the ceiling and the
 upgrade path: `// ponytail: linear scan, index it if the list grows`. Repeat
 each one in `change-summary.md`.
 
+## Time
+
+`date -u +%H:%M` as your first tool call, and again before you write
+`change-summary`. Report the difference.
+
+**Over 15 minutes → one line saying why**, in `change-summary.md`: "re-read
+src/posts, no context map", "three gate failures", "task spanned 4 files". There
+is no hard abort — the number exists so the orchestrator can see which node is
+slow, and so Irfan can tell scope from thrash instead of guessing.
+
 ## Procedure
 
 1. `cd` to your worktree. Confirm it: `git status --short --branch`. Working in
@@ -86,7 +96,17 @@ each one in `change-summary.md`.
    rewrites your `npx vitest run` into `rtk vitest run`, and `rtk test`
    swallows the child exit code — measured: `rtk test bash -c 'exit 1'` returns
    0. A green-looking rtk run can be a red suite.
-6. Commit in your worktree. Small, honest messages. The Lead squashes them.
+6. Commit in your worktree. **Conventional Commits, imperative, one line, ≤72
+   chars** — `fix(social): dedupe BatchGet keys`. A task id is not a commit
+   message: `T1`, `task 2`, `wip`, `changes` are all rejected. Needs a body?
+   One line of what changed and why — not a bullet dump.
+
+   **No `Co-Authored-By`, no `Generated with`, no AI attribution trailer of any
+   kind.** These are Irfan's commits.
+
+   The orchestrator squashes them — but a squash of seven `T*` commits leaves a
+   reflog nobody can read, and the reflog is exactly where you look when a merge
+   went wrong.
 7. Write `change-summary-<id>.md`. The "How to verify" commands must be exactly
    copy-pasteable — the tester runs those literal strings. Vague commands here
    produce an untested change.
@@ -110,9 +130,14 @@ task.
 - `claude-api` — the change touches Claude/Anthropic model ids, pricing, token
   limits, caching, or the SDK. Read it before opening the file; never answer
   those from memory.
-- `graphify` — **only if** `graphify-out/graph.json` already exists:
+- `graphify` — **only if** `.team-irfan/graphify/graph.json` already exists:
   `graphify query "<question>" --budget 2000` instead of reading files. Never
   build an index mid-task.
+
+**Every tool the graph runs writes inside `.team-irfan/`.** That path is
+gitignored; the repo root is not. A tool whose output lands in the repo root
+ships on the next commit. A tool that cannot be pointed at `.team-irfan/` does
+not get run.
 
 ## Forbidden
 
@@ -129,7 +154,7 @@ task.
 `<run>/change-summary-<id>.md`, then one line:
 
 ```
-EXEC <id> done → <n> files, <n> commits, GATE PASS · found-not-fixed: <n>
+EXEC <id> done → <n> files, <n> commits, GATE PASS · found-not-fixed: <n> · <n>m
 ```
 
 ---

@@ -132,13 +132,38 @@ Agent(
 )
 ```
 
-Model comes from the matrix in `README.md`, overridden by the Model matrix in
-`.team-irfan/config.md` when that project sets one. Pass it explicitly — the
-`model:` line in a role file is documentation, not configuration; nothing reads
-it.
+**Every node spawns `opus`.** That is the default and it does not need a reason.
+The matrices in `README.md` and `.team-irfan/config.md` are the fallback when
+they and this section disagree — this section wins.
+
+Downgrade to `sonnet` only when **all three** hold, and print the reason in the
+ledger:
+
+- the node reads a written spec it does not have to interpret
+- ≤2 files in scope
+- no schema, contract, auth, or security surface in scope
+
+`fable` is the fallback **for opus**, not a cheaper tier — use it when the
+account is at its Opus cap, and say so: `exec-3 fable (opus capped)`. Never
+`haiku`. A node that cheap is a bash command, not an agent.
+
+Pass `model` explicitly on every spawn. The `model:` line in a role file is
+documentation, not configuration; nothing reads it.
 
 Hand each node **only** its artifact paths. No repo tour, no sibling context,
 no summary of what the others are doing.
+
+## Progress — Irfan sees the run, not just the result
+
+After every node returns, print exactly one line before spawning the next:
+
+```
+[3/10] pjm done · 5 tasks · budget 12/60
+```
+
+Node, one fact, budget. No prose, no recap of what the node said. A run that
+prints nothing between "starting" and a commit appearing is a run Irfan has to
+audit out of git, which costs him more than the run saved him.
 
 ## Sequence
 
@@ -146,9 +171,23 @@ no summary of what the others are doing.
 
 ```bash
 git status --short --branch          # confirm branch and clean tree first
+git switch -c <type>/<slug>          # the goal branch — see below
 touch .tg-active                     # arms the SubagentStop gate hook
 TG_RECORD_BASE=1 TG_RUN=<run> bash ~/.claude/team-graph/hooks/gate.sh
 ```
+
+**Every goal gets its own branch.** Branch off the default branch, never off the
+previous run's branch. `<type>` is the same vocabulary the commits use:
+
+| type | for |
+|---|---|
+| `feat` | new feature |
+| `fix` | fixing broken behavior |
+| `chore` | docs, config, tooling — anything not user-facing |
+
+`<slug>` is the goal in 2–4 kebab-case words. `feat/block-unblock-user`,
+`fix/follow-transaction`, `chore/update-registry-docs`. Dirty tree → stop and
+ask. Never carry uncommitted work onto a new goal branch.
 
 Baseline is optional — no coverage provider, the gate says so and the run
 continues. Do not install one to make the check exist.
@@ -157,27 +196,49 @@ continues. Do not install one to make the check exist.
 Returns open questions → **you ask Irfan and wait.** Write the answers into
 `brief.md` as `Irfan confirmed`. Never answer on his behalf.
 
-**3. PjM** (`sonnet`) → `<run>/tasks.md` + `<run>/task-<id>.md`.
+**3. PjM** (`opus`) → `<run>/tasks.md` + `<run>/task-<id>.md`.
 Returns the SCOPE block → **you show it to Irfan and wait for approval.**
 Silence is not approval. Cut tasks get deleted and noted; added tasks get a
 full task-spec.
 
+**3b. Context maps — before any executor spawns**
+
+`tasks.md` now names every in-scope folder. Check which already have one:
+
+```bash
+ls .team-irfan/context/
+```
+
+For each in-scope folder **without** `.team-irfan/context/<slug>.md`, spawn
+**Init** (`opus`) with that folder and nothing else. Independent folders go in
+one message, multiple tool calls.
+
+Init is a node, and a leaf cannot spawn a node — so if you skip this, no map is
+ever written and every executor re-reads the same folders from scratch. A run
+whose `metrics.json` says `context_maps_used: none` did exactly that.
+
+Confirm the files exist on disk before step 4. A map you did not verify is a map
+you did not write.
+
 **4. Worktrees — you create them, not Lead**
 
 ```bash
-git worktree add ../tg-<slug>-<id> -b tg/<slug>-<id>
+git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
 ```
+
+Task branches inherit the goal's `<type>`. The `tg-` prefix stays on the
+*directory* — it marks a throwaway worktree — never on the branch.
 
 One per task, never shared. Tasks with `Depends on:` wait for the dependency to
 merge first.
 
-**5. Executors** (`sonnet`) — as many as `tasks.md` has tasks, not one more.
+**5. Executors** (`opus`) — as many as `tasks.md` has tasks, not one more.
 Backend-only work spawns zero frontend agents. Independent ones go in **one
 message, multiple tool calls**, so they run concurrently. Each gets its
 `task-<id>.md`, its worktree path, the run dir, the base branch → returns
 `change-summary-<id>.md`.
 
-**6. Tester** (`sonnet`) per task → `test-report-<id>.md`.
+**6. Tester** (`opus`) per task → `test-report-<id>.md`.
 
 - **PASS** → mergeable.
 - **FAIL** → the tester already called `retry-guard.sh`. **You** re-spawn the
@@ -190,16 +251,23 @@ message, multiple tool calls**, so they run concurrently. Each gets its
 Never re-run a failed task yourself "just to check". That is a fourth attempt
 wearing a different hat.
 
-**7. Merge — with the registry in the same commit** — only after a PASS, in
-dependency order:
+**7. Merge — one commit per task** — only after a PASS, in dependency order:
 
 ```bash
-git merge --squash tg/<slug>-<id>
+# once per task:
+git merge --squash <type>/<slug>-<id>
+git commit -m "<type>(<scope>): <what this task landed>"
 git worktree remove ../tg-<slug>-<id>
-git branch -D tg/<slug>-<id>
+git branch -D <type>/<slug>-<id>
 ```
 
-**Before you commit, update `docs/REGISTRY.md`.** One entry per *feature*
+**`--squash` collapses one worktree's own commits and nothing else.** It is
+there because an executor's in-progress commits are noise. It is not a way to
+fold tasks together: separate work stays a separate commit. Never one
+mega-commit for the run.
+
+**Before the last task's commit, update `docs/REGISTRY.md` and stage it with
+that commit.** One entry per *feature*
 worked, not one per task — newest-first, directly below the Index, and update
 that feature's Index row:
 
@@ -228,6 +296,12 @@ The registry entry and the code land in **one commit**. Committing the code
 first and the registry "after" is how a registry goes stale, and a stale
 registry is worse than none — every later run trusts it and skips the read.
 
+Every merge commit follows the rule the executors follow: Conventional Commits,
+imperative, one line, ≤72 chars, naming **what landed** — never the task id it
+squashed. **No `Co-Authored-By`, no `Generated with`, no AI attribution
+trailer.** A global git or harness setting may append one anyway: `git log -1`
+after committing and amend it out if it is there.
+
 A merge conflict between two tasks means PjM mis-sized them: resolve it, and
 put it in `lessons.md`. Never silently take one side.
 
@@ -236,9 +310,21 @@ Reviews the merged diff, not each worktree — the bug that matters is the one
 two tasks create together. **Max 2 review rounds**; still failing → write the
 handoff and stop.
 
-**9. Sign-off** → **you show `report.md` to Irfan and wait.** Breaking change
-in it → it is a Blocker, never a footnote, and it does not ship without his
-explicit acceptance.
+**9. Sign-off** → `report.md` lives in the run directory, outside the repo, and
+nobody reads it there. Print this block in chat **and** write it to
+`docs/handoff/<yyyy-mm-dd>-<slug>.md`:
+
+```markdown
+**What landed:** <2–3 lines>
+**How to run:** <copy-pasteable command>
+**How to test:** <copy-pasteable command — the literal string, not a description of one>
+**Proof:** <the gate.sh result line, pasted, never summarised>
+**Not done:** <what was cut or left behind, or `none`>
+**Verdict:** shipped | partial | blocked — <one line>
+```
+
+Then wait. A breaking change is a Blocker inside that block, never a footnote,
+and it does not ship without Irfan's explicit acceptance.
 
 **10. Close out**
 
@@ -250,9 +336,14 @@ bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL <total-calls> 60 \
 rm .tg-active
 ```
 
+`context_maps_used` and `maps_refreshed` name **files that exist on disk**.
+`ls .team-irfan/context/` before you pass them. Reporting a refresh of a map
+that was never written makes the metric worse than absent — the evaluation node
+reads it as evidence the memory layer worked.
+
 `<total-calls>` is the ledger's final number, not an estimate made now.
 `retries` and `over_budget` are derived by the script — do not pass them.
-Then spawn **Retro** (`sonnet`) → `lessons.md`, and show it to Irfan.
+Then spawn **Retro** (`opus`) → `lessons.md`, and show it to Irfan.
 
 ## The budget ledger — you own it
 

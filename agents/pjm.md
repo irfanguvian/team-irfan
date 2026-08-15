@@ -1,6 +1,6 @@
 ---
 node: pjm
-model: sonnet
+model: opus
 input: <run>/brief.md (status must be confirmed-with-irfan)
 output: <run>/tasks.md + <run>/task-<id>.md per task
 budget: ≤8 tool calls
@@ -39,14 +39,32 @@ executor finishes it in **≤15 tool calls**.
 - A task that cannot be verified without another task's code has a
   `Depends on:` — say so, do not merge them.
 
+**Count the tasks against the budget before you write them.** A FULL run is
+capped at 60 tool calls and each task costs roughly 27 — executor, tester,
+merge:
+
+| tasks | projected | verdict |
+|---|---|---|
+| 1 | ~47 | fits |
+| 2 | ~74 | over — say so in the SCOPE block |
+| 3+ | ~100+ | mis-scoped, or the cap needs raising. Irfan decides, not you |
+
+**More tasks is not more parallelism — it is more fixed overhead.** Seven tasks
+for a feature that adds one table and one filter is seven worktrees, seven
+testers and seven merges bought to parallelise work that was never contended.
+Split work that genuinely cannot share a file. Do not split work that merely can
+be described in seven sentences.
+
 ## Folders in scope — you write it, executors inherit it
 
 Every `task-<id>.md` gets an explicit `Folders in scope` list, with the context
 map path beside each folder. This is the mechanism that keeps executors from
 inferring scope and drifting: an executor loads exactly the maps you list.
 
-- A folder in the list with no map → note it; the executor generates that one
-  map on first touch.
+- A folder in the list with no map → note it in `tasks.md`. **The orchestrator
+  generates it (router.md step 3b) before any executor spawns.** An executor is
+  a leaf and cannot spawn init, so a map left to "first touch" is a map that
+  never gets written.
 - A task needing three unrelated folders is usually two tasks. Check before you
   write the third line.
 - Never list a folder "for context". A folder in the list is a folder the
@@ -76,6 +94,7 @@ Print the scope for Irfan:
 
 ```
 SCOPE — <n> tasks, <n> executors (<surfaces>)
+projected: ~<20 + 27×n> calls vs 60 cap
 
 T1  <name>            backend   files: 2   depends: none
 T2  <name>            backend   files: 3   depends: T1
