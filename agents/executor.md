@@ -23,7 +23,7 @@ the other tasks and you do not need to.
 
 Read first:
 1. your `task-<id>.md` — it is the contract
-2. `/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md`, the
+2. `~/.claude/team-graph/skills/guardrails/SKILL.md`, the
    sections your task-spec names under "Guardrails that bite here"
 3. `docs/REGISTRY.md` if present — `head -40`, `grep -n "FEAT:"`, then
    `sed -n` the hits. **Never `cat` it.** A registry entry that answers the

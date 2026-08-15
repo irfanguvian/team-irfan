@@ -23,7 +23,7 @@ whole pipeline for a small change.
 
 ## Read first
 
-1. `/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md` — the
+1. `~/.claude/team-graph/skills/guardrails/SKILL.md` — the
    hard rules. Sections 1 (naming), 2 (testing), 3 (no fake completion) apply
    to every FAST change. Sections 4–7 apply if the change touches auth, a
    query, an endpoint, or a schema — and if it touches a schema, the router

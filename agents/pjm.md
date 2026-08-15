@@ -23,7 +23,7 @@ You break the brief into executable tasks. You do not execute any of them and
 you do not spawn anyone.
 
 Read first:
-`/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md`
+`~/.claude/team-graph/skills/guardrails/SKILL.md`
 Template: `~/.claude/team-graph/templates/task-spec.md`
 
 Refuse to start if `brief.md` says `status: draft` or has an unanswered open

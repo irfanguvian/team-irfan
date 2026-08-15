@@ -23,7 +23,7 @@ You establish what "correct" means. You write no code and choose no
 implementation.
 
 Read first:
-`/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md`
+`~/.claude/team-graph/skills/guardrails/SKILL.md`
 Template: `~/.claude/team-graph/templates/brief.md`
 
 ## The one rule that matters

@@ -1,303 +1,397 @@
-# Team Graph
+# team-irfan
 
-Stateless agents, artifact state, human gates.
+A multi-agent workflow for Claude Code. One command triages a task and either
+hands it back to you, answers it, fixes it with one agent, or runs a full
+review pipeline with real git worktrees and human approval gates.
 
-Each agent = **system prompt** (its role file in `agents/`) + **prompt** (the
-input artifact) + **context** (that artifact and its own worktree, nothing
-else) + **settings** (rigid hooks, probabilistic prompts).
+**Stateless agents, artifact state, human gates.** No agent remembers anything —
+all state lives in files. Kill any node mid-run and the next one picks up from
+disk.
 
-All state lives in `runs/<yyyymmdd-slug>/`. No agent remembers anything. Kill
-any node mid-run and the next one picks up from the files.
-
-Invoke: `/team-irfan <task>`
+The design goal is not "more agents". It is **spending fewer tool calls than
+doing it yourself would cost**, and refusing to run at all when it wouldn't.
 
 ---
 
-## Flow
+## Install
 
-```
-/team-irfan "<task>"
-        │
-        ▼
-   ┌─────────┐
-   │ ROUTER  │  triage only, never edits
-   └────┬────┘
-        │
-        ├── HAND-BACK ── "faster manually: <reason>"  ── STOP
-        │
-        ├── QUESTION ─── answer inline, 0 agents, 0 artifacts
-        │
-        ├── FAST ──────► SOLO EXECUTOR ─► gate.sh ─► report (4Q)   [≤15 calls]
-        │                (current tree, no worktree, no commit)
-        │
-        └── FULL                                                   [≤60 calls]
+```bash
+git clone https://github.com/irfanguvian/team-irfan.git ~/.claude/team-graph
 ```
 
-## Topology — a star, not a chain
+Register the slash commands — create `~/.claude/commands/team-irfan.md`:
 
-The **orchestrator runs in the main thread**. Every other node is a **leaf
-subagent**: one artifact in, one artifact out, spawns nothing.
+```markdown
+---
+description: team-irfan agent graph — router triages the task
+argument-hint: <task>
+---
 
-This is not a stylistic choice. The orchestrator is the only context with a
-channel to Irfan, and the graph has three hard human gates. A subagent cannot
-stop and ask — so a gate held by a subagent silently degrades into an
-assumption with a checkbox. The gates live in the main thread, and therefore
-nothing nests.
+Read `~/.claude/team-graph/agents/router.md` and follow it exactly for this
+turn. It is your system prompt; this message is your input.
 
-It also means the graph does not depend on whether nested subagent spawning
-works in a given harness. Every node is a leaf, so the question never arises.
+TASK: $ARGUMENTS
+
+- Triage first. Print the route before any other output.
+- HAND-BACK means stop.
+```
+
+And `~/.claude/commands/team-irfan-evaluation.md`:
+
+```markdown
+---
+description: Aggregate run metrics, find routing errors, propose prompt diffs
+---
+
+Read `~/.claude/team-graph/agents/evaluation.md` and follow it exactly.
+Counts come from `runs/*/metrics.json` only, never from prose.
+```
+
+Optional — enforce the quality gate on subagent exit. Add to
+`~/.claude/settings.json` (additive; nothing else changes):
+
+```json
+"hooks": {
+  "SubagentStop": [
+    { "hooks": [ { "type": "command",
+        "command": "bash ~/.claude/team-graph/hooks/subagent-gate.sh" } ] }
+  ]
+}
+```
+
+This hook is **inert** unless a `.tg-active` marker file exists in the working
+directory, which only a full run creates. No marker, no effect — your other
+workflows are untouched.
+
+Verify the install:
+
+```bash
+cd ~/.claude/team-graph/tests/fixture && npm install
+bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 74 passed, CHECKS PASS
+```
+
+---
+
+## Usage
+
+### `/team-irfan <task>`
+
+Triages, then acts. Four outcomes:
+
+| Route | When | What happens | Budget |
+|---|---|---|---|
+| **HAND-BACK** | under ~5 min by hand, or too ambiguous to triage | one line: `faster manually: <reason>`, then stops | — |
+| **QUESTION** | asks something rather than changing something | answered directly, zero agents | — |
+| **FAST** | ≤2 files, known pattern, no schema/contract change | one executor → quality gate → report | ≤15 calls |
+| **FULL** | everything else | the full pipeline below | ≤60 calls |
+
+```bash
+/team-irfan "fix the off-by-one in the bulk discount threshold"
+# ROUTE: FAST — 2 files, existing pattern, no contract change
+
+/team-irfan "rename this variable"
+# HAND-BACK — faster manually: one rename, under five minutes by hand
+
+/team-irfan "add tiered discounts with per-customer overrides and an admin endpoint"
+# ROUTE: FULL — 3+ files, schema change, API contract change
+```
+
+**HAND-BACK is a feature, not a failure.** Running a five-agent pipeline on a
+typo is the most expensive thing this system can do. The router is instructed
+to prefer handing back when it's unsure.
+
+### `/team-irfan init`
+
+Run once per project. Writes `.team-irfan/config.md`:
+
+- package manager, test runner, linter, ORM — **detected**, not guessed
+- the exact `typecheck` / `test` / `coverage` / `lint` / `build` commands, copied
+  verbatim from `package.json`. A script that doesn't exist is written as `none`.
+- conventions **extracted from your actual code** — folder layout, file naming,
+  layering, how existing tests are written. Including the inconsistencies: a repo
+  that mixes `payment_info.service.ts` with `sales-executive.service.ts` has two
+  conventions, and agents need to know which one wins where.
+- a per-project model matrix you can override
+
+It also creates `docs/REGISTRY.md` if missing, and adds `.team-irfan/` to
+`.gitignore` — context is local, never committed.
+
+### `/team-irfan init <folder>`
+
+Writes one context map, `.team-irfan/context/<folder-slug>.md`, capped at 80
+lines:
+
+```markdown
+---
+folder: src/app/vendor
+last_commit: 232b9bef12fb74a1e2b86a24f6d28fddff9f7ca8
+updated: 2026-08-15
+---
+## Purpose            (2-3 lines)
+## Key files          (file → one-liner; the ones that explain the rest)
+## Entry points       (routes, exports, cron jobs)
+## Conventions        (only where this folder differs from config.md)
+## Depends on / used by
+## Registry tags      (FEAT/MOD/DEC ids to grep before reading code)
+```
+
+**Whole-repo indexing is banned.** Maps are per-folder and lazy — generated when
+you name a folder, or on the first task that touches one. A repo with 40 folders
+and 3 active ones ends up with 3 maps. That's correct, not incomplete.
+
+### `/team-irfan-evaluation`
+
+On-demand. Reads every `runs/*/metrics.json`, aggregates, and finds where the
+routing rubric is wrong:
+
+- FAST runs that blew their budget → should have been FULL, or HAND-BACK
+- FULL runs that were trivial → the rubric is too timid
+- a hand-back rate near zero → the router isn't handing back, which is the most
+  expensive failure mode because every run still *looks* successful
+
+Each finding becomes a **concrete diff to an agent prompt file**, shown one at a
+time, applied only on your `y`. It never edits itself, your `CLAUDE.md`, your
+skills, or your settings.
+
+---
+
+## How context loading works
+
+This is the part that makes repeat runs cheap. **Agents read context maps, not
+folders.**
+
+1. Resolve the folders in scope (the project manager writes `folders in scope`
+   into each task spec, so executors inherit scope mechanically).
+2. Load `config.md` + the maps for **those folders only**.
+3. Freshness check — one command per folder:
+   ```bash
+   git diff --name-only <last_commit> -- <folder>
+   ```
+   - **Empty** → the map is current. Trust it. **Do not re-read the folder.**
+   - **Non-empty** → re-read **only the files it named** (≤10 tool calls),
+     update `last_commit`.
+4. No map → generate that one folder's map, then proceed.
+5. Reading outside the in-scope folders is a **forbidden action**. Grep
+   `docs/REGISTRY.md` for the `FEAT:`/`MOD:` tags instead, or read the
+   neighbouring folder's map.
+
+The failure this prevents is silent: an agent reads a stale map, writes code
+against a convention that moved three commits ago, and the tests pass because it
+compiles. One `git diff` per folder is cheaper than being wrong once.
+
+---
+
+## The FULL pipeline
+
+**Topology is a star, not a chain.** The orchestrator runs in the main thread;
+every other node is a **leaf subagent** — one artifact in, one artifact out,
+spawns nothing.
+
+That isn't a style choice. The orchestrator is the only context with a channel
+to you, and this pipeline has three hard human gates. A subagent cannot stop and
+ask — so a gate held by a subagent silently degrades into an assumption with a
+checkbox. The gates live in the main thread, and therefore nothing nests.
+
+It also means the pipeline doesn't depend on whether nested subagent spawning
+works in your harness. Every node is a leaf, so the question never arises.
 
 ```
-ORCHESTRATOR (main thread, opus — agents/router.md)
+ORCHESTRATOR (main thread)
   │  owns: the sequence · the budget ledger · every git operation
-  │        · every conversation with Irfan
+  │        · every conversation with you
   │
-  ├─ spawn PM (opus) ───────────────► brief.md + open questions
-  │     ⏸ IRFAN ANSWERS ⏸   orchestrator writes them in as "Irfan confirmed"
+  ├─ PM ──────────────────► brief.md
+  │    Every business rule carries a source: a file:line, a registry id, or
+  │    "confirmed by you". A rule it inferred is not a rule — it's a question.
+  │     ⏸ YOU ANSWER ⏸
   │
-  ├─ spawn PjM (sonnet) ────────────► tasks.md + task-<id>.md (folders in scope)
-  │     ⏸ IRFAN APPROVES SCOPE ⏸    silence is not approval
+  ├─ PjM ─────────────────► tasks.md + one task-spec per task
+  │    Executor count comes from the breakdown. Backend-only work spawns
+  │    zero frontend agents.
+  │     ⏸ YOU APPROVE SCOPE ⏸   silence is not approval
   │
-  ├─ git worktree add ../tg-<slug>-<id>     one per task, never shared
+  ├─ git worktree add ../tg-<slug>-<id>      one per task, never shared
   │
-  ├─ spawn EXEC 1..N (sonnet) ──┐ ONE message, concurrent
-  │    N = what tasks.md says.  │ backend-only ⇒ zero FE agents
-  │                             └► change-summary-<id>.md + GATE PASS
+  ├─ EXECUTOR ×N ─────────► change-summary.md + GATE PASS
+  │    Independent ones run concurrently. Ponytail rules: reuse before writing,
+  │    stdlib before dependency, root cause not symptom.
   │
-  ├─ spawn TESTER (sonnet) ─────────► test-report-<id>.md (real evidence)
-  │     FAIL → orchestrator re-spawns the SAME executor, SAME worktree,
-  │            with the BUG-n block. retry-guard.sh counts.
-  │            3rd attempt ─► ESCALATE ─► Irfan decides
+  ├─ TESTER ──────────────► test-report.md
+  │    Writes test cases from the SPEC, before looking at the diff. Runs the
+  │    exact verify commands from change-summary.md. Real curl/browser evidence.
+  │    FAIL → same executor, same worktree, with the bug block.
+  │           Max 2 retries, then ESCALATE. No silent loops.
   │
-  ├─ git merge --squash · worktree remove · branch -D
-  │     whole feature lands as ONE commit
+  ├─ git merge --squash · worktree remove
+  │    Whole feature lands as ONE commit, with the docs/REGISTRY.md entry
+  │    in the same commit.
   │
-  ├─ spawn LEAD (opus) ─────────────► review of the MERGED diff + report.md draft
-  │     ⏸ IRFAN SIGNS OFF ⏸          breaking change = Blocker, never a footnote
+  ├─ LEAD ────────────────► review of the MERGED diff + report.md
+  │    Reviews the merged diff, not each worktree — the bug that matters is the
+  │    one two tasks create together. Max 2 review rounds.
+  │     ⏸ YOU SIGN OFF ⏸    breaking change = blocker, never a footnote
   │
-  ├─ metrics.sh → runs/<id>/metrics.json · rm .tg-active
-  │
-  └─ spawn RETRO (sonnet) ──────────► lessons.md, shown to Irfan.
-                                      NEVER edits CLAUDE.md or any skill.
+  └─ RETRO ───────────────► lessons.md, shown to you.
+                            Never edits CLAUDE.md, a skill, or a hook.
 ```
-
-Spawn calls use `subagent_type: "general-purpose"` with the role file named in
-the prompt and **`model` passed explicitly**. The `model:` line in a role file
-is documentation — those files are not registered subagents, so nothing parses
-their frontmatter.
 
 ---
 
-## Rigid vs probabilistic
+## Quality gate
 
-**Rigid — hooks, zero LLM, exit codes only:**
+`hooks/gate.sh` — deterministic, zero LLM, run from a project root:
 
-| Check | Where |
-|---|---|
-| typecheck | `hooks/gate.sh` |
-| unit tests | `hooks/gate.sh` |
-| coverage diff | `hooks/gate.sh` |
-| stub-test detection | `hooks/gate.sh` |
-| retry limit | `hooks/retry-guard.sh` |
-| worktree isolation | orchestrator, one worktree per executor |
-| gate enforced on subagent exit | `hooks/subagent-gate.sh` via `SubagentStop` |
+1. Detects package manager (pnpm/yarn/bun/npm) and runner (vitest/jest)
+2. Typecheck → fail = exit 1
+3. Unit tests → fail = exit 1
+4. Coverage diff — per-file, on changed files only, against a recorded baseline
+5. **Stub detection** — `expect(true)`, `assert.ok(true)`, `.skip(`, `.only(`,
+   `it.todo`, `xit(`, and multi-line empty test bodies. Any hit fails with
+   `file:line`.
+6. `GATE PASS` or `GATE FAIL: <reason>`
 
-`subagent-gate.sh` is registered in `~/.claude/settings.json` under
-`SubagentStop`. It is inert unless a `.tg-active` marker file sits in the cwd —
-the orchestrator creates it when a FULL run opens and removes it after
-sign-off. No marker, no effect: every other workflow on this machine is
-untouched, including OMC's. When it is armed
-and the gate fails, it exits 2, which blocks the subagent from reporting done
-and feeds it the failure. `stop_hook_active` short-circuits the second block so
-a subagent can never be trapped in a loop.
+Every executor must run it and paste the output. A report without gate output is
+not a report.
 
-**Probabilistic — prompts, judged not measured:**
+```bash
+bash hooks/gate.sh                    # from a project root
+TG_SCAN=all bash hooks/gate.sh        # scan every test file, not just changed
+```
 
-problem solving · test-case design · documentation · retro feedback
+> **If you use RTK:** `gate.sh` deliberately calls `tsc`/`vitest` raw. Measured:
+> `rtk test bash -c 'exit 1'` returns **0** — it swallows the child exit code, so
+> a green-looking `rtk` run can be a red suite. The RTK PreToolUse hook rewrites
+> an agent's `npx vitest run` into `rtk vitest run`, which is why `gate.sh` is the
+> only test result any node is allowed to cite.
 
-A deterministic check is never handed to a prompt. A prompt never replaces a
-deterministic check.
+---
+
+## Safety
+
+Every agent carries an identical forbidden-actions block:
+
+- **No `git push`** in any form — no force, no tags, no releases
+- **No deploys** — vercel, fly, kubectl apply, terraform apply, docker push
+- **No CI triggers or bypasses** — no `workflow_dispatch`, no `[skip ci]`, no
+  editing a workflow to make a check pass. **CI stays the final gate.** A green
+  `gate.sh` is a local signal, not permission to skip CI.
+- **No reading or writing `.env*`, secrets, credentials, keys**
+- **No destructive migrations** — `DROP`, `TRUNCATE`, `migrate reset`,
+  `--accept-data-loss`. Proposed with a rollback plan for you to run.
+- **No package publishing**
+- **No editing outside declared scope**
+
+> **The workflow's terminus is a local merge commit. You push. You deploy.**
 
 ---
 
 ## Efficiency contract
 
-Permanent. Every node inherits it.
+- **FAST ≤15 tool calls. FULL ≤60 per feature**, everyone's calls included.
+  The orchestrator keeps a ledger and stops at 60 with a partial report rather
+  than overrunning silently.
+- Per-node budgets are **ceilings, not allowances**, and deliberately don't sum
+  to 60 — a 2-task feature at every ceiling would spend ~100. Realistic
+  projection is roughly `20 + 27×tasks`; over 60, the orchestrator asks you to
+  raise the cap or cut scope **before** the first worktree.
+- **Agents never read whole trees.** Context maps first, then `docs/REGISTRY.md`
+  by tag (`head -40`, `grep -n "FEAT:"`, `sed -n` the hits — never `cat`), then
+  targeted files.
+- **Retry limit 2, then escalate.** No silent loops.
+- Reports are always four questions — Done / Fine or not / Blockers / Next —
+  plus a verdict line.
 
-- **Fast path: ≤15 tool calls.** Full path: **≤60 per feature**, everyone's
-  calls included. The orchestrator keeps the ledger in `tasks.md` and stops at
-  60 — a partial `report.md` with the rest in Blockers, never a silent overrun.
-- **Per-node budgets are ceilings, not allowances**, and they deliberately do
-  not sum to 60:
+---
 
-  | router | pm | pjm | lead | executor | tester | retro |
-  |---|---|---|---|---|---|---|
-  | 4 (+orchestration) | 10 | 8 | 12 | 15 ×task ×attempt | 12 ×task ×attempt | 5 |
+## Rigid vs probabilistic
 
-  A 2-task feature at every ceiling would spend ~100. No run may spend every
-  ceiling. Roughly `20 + 27×tasks` is the realistic projection — over 60 means
-  the orchestrator asks Irfan to raise the cap or cut scope **before** the
-  first worktree, not after.
-- **Router must HAND-BACK when manual is faster.** Under ~5 minutes of human
-  work, or too ambiguous to triage — one line, then stop. Running the graph on
-  a typo is the most expensive failure mode there is.
-- **Reports are always the four questions** — Done / Fine or not / Blockers /
-  Next — plus a Verdict line. Short, human-readable, no machine jargon.
-- **Agents never read whole trees.** Grep `docs/REGISTRY.md` (`head -40`, then
-  `grep -n "FEAT:"`, then `sed -n` the hits — never `cat`), then targeted files
-  only. A registry entry that answers the question means the code it describes
-  does not get re-read.
-- **Retry limit 2, then escalate.** No silent loops, ever.
-- **Human gates are hard stops:** PjM scope approval, ship sign-off. A node
-  that passes one on its own has failed.
-- **Context loading is map-first.** Agents read context maps, not folders.
-  Folder re-reads happen only on staleness, only for the changed files, ≤10
-  tool calls per refresh.
-- **Init is per-folder and lazy. Whole-repo indexing is banned.**
-- **`/team-irfan-evaluation` is on-demand** — Irfan runs it, never automatic,
-  never self-applying. Every proposal is one diff, approved one at a time.
-- **Only the orchestrator spawns.** Every other node is a leaf: one artifact
-  in, one artifact out. Enforced by `run-checks.sh` check 9b.
+A deterministic check is never handed to a prompt. A prompt never replaces a
+deterministic check.
+
+| Rigid (hooks, zero LLM) | Probabilistic (prompts) |
+|---|---|
+| typecheck, unit tests, coverage diff | problem solving |
+| stub-test detection | test-case design |
+| retry limit / escalation | convention extraction |
+| worktree isolation | documentation |
+| package manager + command detection | retro feedback |
+
+That's why `/team-irfan init` is split in two: `hooks/init-scaffold.sh` detects
+the package manager and copies the commands (facts in a file), and the agent
+fills only Conventions, Purpose, and Key files (things that need reading code).
 
 ---
 
 ## Model matrix
 
-Default. A project overrides it in `.team-irfan/config.md`; delete a row there
-to fall back here.
+Default, overridable per-project in `.team-irfan/config.md`:
 
 | node | model | why |
 |---|---|---|
-| router | opus | triage is the highest-leverage decision in the graph |
+| router / orchestrator | opus | triage is the highest-leverage decision here |
 | pm | opus | inventing a business rule is the most expensive failure |
-| lead | opus | merge, review, breaking-change judgement |
-| init | opus | convention extraction — the whole value is judgement |
-| evaluation | opus | reads the graph's own record and proposes changes |
-| pjm | sonnet | decomposition against a written brief |
-| executor | sonnet | implements one spec'd task |
-| tester | sonnet | runs written commands, records evidence |
-| solo-executor | sonnet | small, bounded, gated |
-| retro | sonnet | summarises artifacts |
+| lead | opus | merge review, breaking-change judgement |
+| init | opus | convention extraction is all judgement |
+| evaluation | opus | reads the record, proposes changes |
+| pjm, executor, tester, solo-executor, retro | sonnet | bounded work against a written spec |
 
-The matrix only takes effect because nodes are spawned as **real subagents**
-with an explicit `model`. Frontmatter alone is inert — a prompt file read
-inline runs on whatever model is already in the session.
-
-## Context loading (v2)
-
-Agents read **context maps, not folders**.
-
-```
-.team-irfan/config.md                    stack, exact gate commands, conventions
-.team-irfan/context/<folder-slug>.md     one per folder, 80-line cap
-```
-
-- `/team-irfan init` writes `config.md` only. **Whole-repo indexing is banned.**
-- `/team-irfan init <folder>` writes one map. Maps are otherwise generated
-  lazily, on first task touching that folder.
-- Freshness is one command: `git diff --name-only <last_commit> -- <folder>`.
-  Empty → trust the map, do not re-read the folder. Non-empty → re-read **only
-  the changed files**, ≤10 tool calls, update `last_commit`.
-- Reading outside the in-scope folders is a forbidden action. Grep
-  `docs/REGISTRY.md` or read the neighbour's map instead.
-- PjM writes `folders in scope` into `task-spec.md` so executors inherit scope
-  mechanically rather than inferring it.
-- `.team-irfan/` is **local only and gitignored**. Never committed.
-
-Canonical rule: `skills/context-loading/SKILL.md`.
-
-## Evaluation (v2)
-
-Every run ends by writing `runs/<id>/metrics.json` via `hooks/metrics.sh` —
-command-sourced facts only. `retries` comes from `retries.json`, `over_budget`
-is derived from the ledger. No node grades itself.
-
-`/team-irfan-evaluation` is **on-demand — Irfan runs it, never automatic,
-never self-applying.** It aggregates every run, finds routing errors (FAST that
-blew budget, FULL that was trivial, a hand-back rate near zero), and proposes
-prompt edits **as diffs, one at a time, applied only on "y"**. It writes
-`docs/eval/<date>-team-irfan.md` and never touches `CLAUDE.md`, skills, hooks,
-or `settings.json`.
-
-## Modes
-
-| Mode | Where | What it does |
-|---|---|---|
-| **Caveman** | every node's prose, all documentation, every verdict | terse output — fragments, no preamble, no tool-call narration. Technical terms, code, and error strings stay verbatim. Warnings and irreversible-action confirmations drop out of caveman for clarity. |
-| **Ponytail** | executors only (solo + full) | the laziest solution that actually works. Ladder: does it need to exist → already in this codebase → stdlib → native → installed dependency → one line → minimum code. Runs *after* understanding, never instead of it. Shortcuts get a `ponytail:` comment naming the ceiling and the upgrade path. |
-
-Ponytail is on executors because that is where the same pattern keeps getting
-re-implemented. It is deliberately **not** on PM, PjM, Tester, or Lead review —
-laziness in requirements or verification is just a gap.
-
----
-
-## Skills each node may load
-
-Curated. Loading a skill costs calls, so no node loads one it does not need.
-
-| Node | Skill | When |
-|---|---|---|
-| all | `team-graph/skills/guardrails/SKILL.md` | always — read it first |
-| PM | `oh-my-claudecode:deep-interview` | only when requirements are genuinely ambiguous and Irfan is available |
-| Executor · Solo | `chrome-devtools-axi` | any UI change — mandatory, a visual change without a browser check is unverified |
-| Executor · Solo | `claude-api` | change touches Claude/Anthropic model ids, pricing, tokens, caching, SDK. Read before opening the file, never answer from memory |
-| Executor · Solo | `graphify` | **only if** `graphify-out/graph.json` already exists — `graphify query "<q>" --budget 2000` instead of reading files. Never build an index mid-task |
-| Tester | `chrome-devtools-axi` | browser E2E |
-| Tester | `run` | launching the project's app to test against |
-| Lead review | `code-review` | correctness pass on the merged diff |
-| Lead review | `security-review` | any auth, input, query, or secret surface |
-| Lead review | `audit-checklist` | review passes only — catches what the review missed |
-| Lead git | `gh-axi` | every GitHub operation, before raw `gh` |
-
-**Deliberately excluded:** `/team`, `/autopilot`, `/ralph`, `/ultrawork`,
-`/ultraqa` — competing orchestrators with different retry policies. Team-graph
-runs its own nodes. Also excluded: `dataviz`, `artifact-*`, `figma-axi`,
-`lavish`, `simplify` — out of scope for this graph.
-
-**RTK is deliberately kept out of `gate.sh`.** Measured, not assumed:
-
-```
-$ rtk test bash -c 'exit 1'   ; echo $?   →  0     # child failure swallowed
-$ rtk err  bash -c 'exit 3'   ; echo $?   →  3     # remapped, not passed through
-```
-
-A gate that trusts `rtk test` reports green on red. `gate.sh` calls
-`tsc`/`vitest`/`jest` raw and caps its own output at 40 lines instead. The
-global PreToolUse hook passes `bash gate.sh` through unchanged (`rtk rewrite`
-returns 1 = no equivalent), so the gate is never rewritten out from under
-itself.
-
-The trap that remains is on **agents**: a bare `npx vitest run` typed by a node
-gets rewritten to `rtk vitest run` and can look green while red. Every executor
-and tester prompt says so. `gate.sh` output is the only test evidence any node
-may report.
+The orchestrator passes `model` explicitly on each spawn. The `model:` line in a
+role file is documentation — these files aren't registered subagents, so nothing
+parses their frontmatter.
 
 ---
 
 ## Layout
 
 ```
-~/.claude/team-graph/
-  agents/     router.md solo-executor.md pm.md pjm.md lead.md executor.md
-              tester.md retro.md
-  hooks/      gate.sh retry-guard.sh subagent-gate.sh
-  skills/     guardrails/SKILL.md
-  templates/  brief.md task-spec.md change-summary.md test-report.md report.md lessons.md
-  runs/       runs/<yyyymmdd-slug>/  ← all state for one run
-  tests/      fixture/ run-checks.sh cases.md
-  README.md
+agents/      router · pm · pjm · lead · executor · tester · retro
+             solo-executor · init · evaluation
+hooks/       gate.sh · retry-guard.sh · subagent-gate.sh
+             metrics.sh · init-scaffold.sh
+skills/      guardrails/   engineering rules every node obeys
+             context-loading/   the map-first rule
+templates/   brief · task-spec · change-summary · test-report
+             report · lessons · config · context-map · metrics.json
+runs/        runs/<yyyymmdd-slug>/  — all state for one run
+tests/       fixture/ · run-checks.sh · cases.md
 ```
 
-A run directory holds: `brief.md`, `tasks.md`, `task-<id>.md`,
-`change-summary-<id>.md`, `test-report-<id>.md`, `coverage-base.txt`,
-`retries.json`, `report.md`, `lessons.md`.
+A run directory holds `brief.md`, `tasks.md`, `task-<id>.md`,
+`change-summary-<id>.md`, `test-report-<id>.md`, `retries.json`, `report.md`,
+`metrics.json`, `lessons.md`.
 
 ---
 
-## Boundaries
+## Tests
 
-Team-graph owns `~/.claude/team-graph/` and the file
-`~/.claude/commands/team-irfan.md`. It touches nothing else. No node edits
-`CLAUDE.md`, `FUNDAMENTALS.md`, `settings.json`, or anything under
-`~/.claude/plugins/`.
+```bash
+bash tests/run-checks.sh        # 74 deterministic checks, zero agents
+```
+
+Covers: stub rejection with `file:line` · clean-fixture pass · typecheck failure
+· unit-test failure · retry escalation on the 3rd attempt · per-task-id counters
+· template field headings · agent contracts (budget, model, forbidden block,
+leaf clause) · init scaffold command detection · context-map headings and the
+80-line cap · staleness detection in **both** directions · metrics schema with
+derived fields · and that `Agent(` appears in no agent file except the
+orchestrator's.
+
+The fixture is a small TypeScript package with a seeded off-by-one bug and a
+toggleable stub test. The harness restores it on exit.
+
+---
+
+## Requirements
+
+Claude Code · `git` · `node` · `bash`. Projects are assumed to be Node/TypeScript
+with `vitest` (never jest) — the gate degrades gracefully elsewhere but the
+guardrails are written for that stack.
+
+## Status
+
+Built and verified check-by-check. **A full end-to-end FULL run has not been
+exercised** — every component is tested in isolation, but the orchestrator's
+complete sequence is still unproven. Start with FAST tasks.
+
+Nested subagent spawning is unverified in this harness; the star topology means
+it doesn't matter.

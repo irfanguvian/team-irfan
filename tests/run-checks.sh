@@ -6,7 +6,7 @@
 
 set -uo pipefail
 
-TG=/Users/dealdulutech02/.claude/team-graph
+TG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="$TG/tests/fixture"
 GATE="$TG/hooks/gate.sh"
 GUARD="$TG/hooks/retry-guard.sh"

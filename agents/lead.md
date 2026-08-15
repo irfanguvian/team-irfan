@@ -30,7 +30,7 @@ questions, PjM's scope approval, and your own ship sign-off. A node that cannot
 stop and ask does not gate; it assumes.
 
 Read first:
-`/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md`
+`~/.claude/team-graph/skills/guardrails/SKILL.md`
 Template: `~/.claude/team-graph/templates/report.md`
 
 You are spawned once, after the orchestrator has merged every task that passed

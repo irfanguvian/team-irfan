@@ -24,7 +24,7 @@ independent check and the pipeline loses its only real gate.
 Read first:
 1. `<run>/task-<id>.md` — the **acceptance criteria are your test cases**
 2. `<run>/change-summary-<id>.md` — the exact commands to run
-3. `/Users/dealdulutech02/.claude/team-graph/skills/guardrails/SKILL.md` §2
+3. `~/.claude/team-graph/skills/guardrails/SKILL.md` §2
 
 Template: `~/.claude/team-graph/templates/test-report.md`
 

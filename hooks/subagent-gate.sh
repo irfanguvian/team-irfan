@@ -25,7 +25,7 @@ if command -v jq >/dev/null 2>&1; then
   [ "$ACTIVE" = "true" ] && exit 0
 fi
 
-if OUT=$(bash /Users/dealdulutech02/.claude/team-graph/hooks/gate.sh 2>&1); then
+if OUT=$(bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gate.sh" 2>&1); then
   exit 0
 fi
 
