@@ -2,3 +2,8 @@
 .omc/
 node_modules/
 tests/fixture/src/stub.test.ts
+
+# run artifacts are local — they quote the project's source and briefs.
+# the durable record is docs/evaluations/, which carries the metrics without
+# the code.
+runs/*/
