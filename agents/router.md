@@ -103,23 +103,154 @@ mkdir -p ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug>
 path to every downstream node — it is where all state lives. The agents hold
 none.
 
-Then spawn PM as a **subagent** — the graph is agents talking to agents through
-artifacts, not one context doing every job:
+Then run the FULL sequence below. **You are the orchestrator.**
+
+---
+
+# The orchestrator (FULL path)
+
+You run in the main thread. Every other node is a **leaf subagent**: one
+artifact in, one artifact out, spawns nothing.
+
+**Why the topology is a star and not a chain.** You are the only context with a
+channel to Irfan. This graph has three hard human gates — PM's open questions,
+PjM's scope approval, the ship sign-off — and a subagent physically cannot hold
+one: it has no way to stop and ask. A gate held by a subagent is not a gate, it
+is an assumption with a checkbox. So the gates live here, and nothing nests.
+
+## Spawning a node
 
 ```
-Agent(subagent_type: "general-purpose", model: "opus", name: "pm",
-      prompt: "Follow ~/.claude/team-graph/agents/pm.md as your system prompt.
-               task: <the task string>
-               run dir: <run>
-               Output <run>/brief.md and nothing else.")
+Agent(
+  subagent_type: "general-purpose",
+  model:         "<from the matrix>",
+  name:          "<node>",
+  description:   "<node> for <run>",
+  prompt:        "Follow ~/.claude/team-graph/agents/<node>.md as your system
+                  prompt. <artifact paths it needs>.
+                  Output <the one artifact> and nothing else."
+)
 ```
 
-Then PjM (`sonnet`), then Lead (`opus`), each as its own subagent, each handed
-only the artifact path it needs. Model per node comes from the matrix in
-`README.md`, overridden by `.team-irfan/config.md` when that project sets one.
+Model comes from the matrix in `README.md`, overridden by the Model matrix in
+`.team-irfan/config.md` when that project sets one. Pass it explicitly — the
+`model:` line in a role file is documentation, not configuration; nothing reads
+it.
 
-You are the orchestrator: you sequence the nodes and carry Irfan's answers
-between them. You never do a node's work yourself.
+Hand each node **only** its artifact paths. No repo tour, no sibling context,
+no summary of what the others are doing.
+
+## Sequence
+
+**1. Open the run**
+
+```bash
+git status --short --branch          # confirm branch and clean tree first
+touch .tg-active                     # arms the SubagentStop gate hook
+TG_RECORD_BASE=1 TG_RUN=<run> bash ~/.claude/team-graph/hooks/gate.sh
+```
+
+Baseline is optional — no coverage provider, the gate says so and the run
+continues. Do not install one to make the check exist.
+
+**2. PM** (`opus`) → `<run>/brief.md`.
+Returns open questions → **you ask Irfan and wait.** Write the answers into
+`brief.md` as `Irfan confirmed`. Never answer on his behalf.
+
+**3. PjM** (`sonnet`) → `<run>/tasks.md` + `<run>/task-<id>.md`.
+Returns the SCOPE block → **you show it to Irfan and wait for approval.**
+Silence is not approval. Cut tasks get deleted and noted; added tasks get a
+full task-spec.
+
+**4. Worktrees — you create them, not Lead**
+
+```bash
+git worktree add ../tg-<slug>-<id> -b tg/<slug>-<id>
+```
+
+One per task, never shared. Tasks with `Depends on:` wait for the dependency to
+merge first.
+
+**5. Executors** (`sonnet`) — as many as `tasks.md` has tasks, not one more.
+Backend-only work spawns zero frontend agents. Independent ones go in **one
+message, multiple tool calls**, so they run concurrently. Each gets its
+`task-<id>.md`, its worktree path, the run dir, the base branch → returns
+`change-summary-<id>.md`.
+
+**6. Tester** (`sonnet`) per task → `test-report-<id>.md`.
+
+- **PASS** → mergeable.
+- **FAIL** → the tester already called `retry-guard.sh`. **You** re-spawn the
+  *same* executor role against the *same* worktree, with the `BUG-n` block in
+  the prompt. Not a fresh worktree — the context is the worktree.
+- **ESCALATE** (3rd attempt) → stop that task. Read the three test reports,
+  then hand it to Irfan: re-scope, or drop. Two retries on one root cause means
+  the failure block was not actionable — record that.
+
+Never re-run a failed task yourself "just to check". That is a fourth attempt
+wearing a different hat.
+
+**7. Merge** — only after a PASS, in dependency order:
+
+```bash
+git merge --squash tg/<slug>-<id>
+git worktree remove ../tg-<slug>-<id>
+git branch -D tg/<slug>-<id>
+```
+
+The whole feature lands as **one commit**. Executor commits stay in the
+worktree as history. A merge conflict between two tasks means PjM mis-sized
+them: resolve it, and put it in `lessons.md`. Never silently take one side.
+
+**8. Lead** (`opus`) → reviews the **merged** diff, drafts `report.md`.
+Reviews the merged diff, not each worktree — the bug that matters is the one
+two tasks create together. **Max 2 review rounds**; still failing → write the
+handoff and stop.
+
+**9. Sign-off** → **you show `report.md` to Irfan and wait.** Breaking change
+in it → it is a Blocker, never a footnote, and it does not ship without his
+explicit acceptance.
+
+**10. Close out**
+
+```bash
+bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL <total-calls> 60 \
+  folders=<a,b> context_maps_used=<slug,slug> maps_refreshed=<slug> \
+  gate_fails="<stage>:<reason>;<stage>:<reason>" \
+  escalated=<true|false> shipped=true human_overrides=<scope-cut,cap-raised>
+rm .tg-active
+```
+
+`<total-calls>` is the ledger's final number, not an estimate made now.
+`retries` and `over_budget` are derived by the script — do not pass them.
+Then spawn **Retro** (`sonnet`) → `lessons.md`, and show it to Irfan.
+
+## The budget ledger — you own it
+
+**≤60 tool calls for the whole feature**, everyone's included. Per-node budgets
+are ceilings, not allowances; they sum to ~100 for a 2-task feature, which is
+the point — no run may spend every ceiling.
+
+Track it in `<run>/tasks.md`, updated after each node:
+
+```
+budget: 34/60 used — pm 7, pjm 5, exec-1 14, test-1 8
+```
+
+At **60, stop.** Write `report.md` with what is done, the rest under Blockers,
+hand it to Irfan. A feature that needs 90 calls is a feature PjM sized wrong,
+and he needs to see that — not a tidy result that hides it. Projected over 60
+before you start (roughly `20 + 27×tasks`)? Say so **before** the first
+worktree and let him raise the cap or cut scope.
+
+## Orchestrator forbidden
+
+- Doing a node's work yourself. You sequence and you talk to Irfan.
+- Answering a node's question to Irfan on his behalf.
+- Proceeding past a gate on silence.
+- Letting any node spawn another node.
+- Merging without a PASS, or past an ESCALATE.
+- Leaving `.tg-active`, a worktree, or a `tg/` branch behind.
 
 ## Metrics — HAND-BACK and QUESTION too
 

@@ -31,55 +31,60 @@ Invoke: `/team-irfan <task>`
         │                (current tree, no worktree, no commit)
         │
         └── FULL                                                   [≤60 calls]
-              │
-              ▼
-        ┌──────────┐
-        │    PM    │  brief.md
-        └────┬─────┘  verifies business logic WITH IRFAN
-             │        never invents a stakeholder answer
-             ▼
-        ┌──────────┐
-        │   PjM    │  tasks.md + task-spec.md per task
-        └────┬─────┘
-             │
-        ⏸ ── IRFAN APPROVES SCOPE ── ⏸
-             │
-             ▼
-        ┌──────────┐
-        │   LEAD   │  spawns N executors from the breakdown
-        └────┬─────┘  N = what the work needs. backend-only ⇒ 0 FE agents
-             │        git worktree add ../tg-<slug>-<id>   (one each)
-             │
-             ├──► EXEC 1 ─► change-summary.md ─► gate.sh
-             ├──► EXEC 2 ─► change-summary.md ─► gate.sh
-             └──► EXEC n ─► change-summary.md ─► gate.sh
-                              │
-                              ▼
-                        ┌──────────┐
-                        │  TESTER  │  test-report.md, E2E, real evidence
-                        └────┬─────┘  runs the exact commands from
-                             │        change-summary.md "How to verify"
-                 FAIL ───────┤
-                             │  back to the SAME executor + the failure block
-                             │  retry-guard.sh: max 2 retries
-                             │  3rd attempt ─► ESCALATE ─► Lead ─► Irfan
-                             │
-                 PASS ───────▼
-                        ┌──────────┐
-                        │   LEAD   │  merge worktrees + code review
-                        └────┬─────┘  final merge = ONE commit
-                             │        git worktree remove after merge
-                             ▼
-                        report.md (4 questions + Verdict)
-                             │
-                        ⏸ ── IRFAN SIGNS OFF ── ⏸
-                             │
-                             ▼
-                        ┌──────────┐
-                        │  RETRO   │  runs/<id>/lessons.md
-                        └──────────┘  shows it to Irfan.
+```
+
+## Topology — a star, not a chain
+
+The **orchestrator runs in the main thread**. Every other node is a **leaf
+subagent**: one artifact in, one artifact out, spawns nothing.
+
+This is not a stylistic choice. The orchestrator is the only context with a
+channel to Irfan, and the graph has three hard human gates. A subagent cannot
+stop and ask — so a gate held by a subagent silently degrades into an
+assumption with a checkbox. The gates live in the main thread, and therefore
+nothing nests.
+
+It also means the graph does not depend on whether nested subagent spawning
+works in a given harness. Every node is a leaf, so the question never arises.
+
+```
+ORCHESTRATOR (main thread, opus — agents/router.md)
+  │  owns: the sequence · the budget ledger · every git operation
+  │        · every conversation with Irfan
+  │
+  ├─ spawn PM (opus) ───────────────► brief.md + open questions
+  │     ⏸ IRFAN ANSWERS ⏸   orchestrator writes them in as "Irfan confirmed"
+  │
+  ├─ spawn PjM (sonnet) ────────────► tasks.md + task-<id>.md (folders in scope)
+  │     ⏸ IRFAN APPROVES SCOPE ⏸    silence is not approval
+  │
+  ├─ git worktree add ../tg-<slug>-<id>     one per task, never shared
+  │
+  ├─ spawn EXEC 1..N (sonnet) ──┐ ONE message, concurrent
+  │    N = what tasks.md says.  │ backend-only ⇒ zero FE agents
+  │                             └► change-summary-<id>.md + GATE PASS
+  │
+  ├─ spawn TESTER (sonnet) ─────────► test-report-<id>.md (real evidence)
+  │     FAIL → orchestrator re-spawns the SAME executor, SAME worktree,
+  │            with the BUG-n block. retry-guard.sh counts.
+  │            3rd attempt ─► ESCALATE ─► Irfan decides
+  │
+  ├─ git merge --squash · worktree remove · branch -D
+  │     whole feature lands as ONE commit
+  │
+  ├─ spawn LEAD (opus) ─────────────► review of the MERGED diff + report.md draft
+  │     ⏸ IRFAN SIGNS OFF ⏸          breaking change = Blocker, never a footnote
+  │
+  ├─ metrics.sh → runs/<id>/metrics.json · rm .tg-active
+  │
+  └─ spawn RETRO (sonnet) ──────────► lessons.md, shown to Irfan.
                                       NEVER edits CLAUDE.md or any skill.
 ```
+
+Spawn calls use `subagent_type: "general-purpose"` with the role file named in
+the prompt and **`model` passed explicitly**. The `model:` line in a role file
+is documentation — those files are not registered subagents, so nothing parses
+their frontmatter.
 
 ---
 

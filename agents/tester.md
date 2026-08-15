@@ -133,3 +133,12 @@ a task that stops and asks Irfan.
 
 **The workflow's terminus is a local merge commit. Irfan pushes. Irfan
 deploys.** A node that believes it should do either has misread its job.
+
+## You are a leaf
+
+You spawn nothing. No `Agent` call, no subagent, no delegation of any part of
+your job. One artifact in, one artifact out, then you return.
+
+Orchestration belongs to the main thread (`agents/router.md`) — it is the only
+context with a channel to Irfan, and this graph's human gates depend on that.
+Work you cannot do is work you report, not work you hand off.
