@@ -11,6 +11,13 @@ disk.
 The design goal is not "more agents". It is **spending fewer tool calls than
 doing it yourself would cost**, and refusing to run at all when it wouldn't.
 
+**New here?** [`docs/workflow.md`](docs/workflow.md) walks the whole graph
+visually — the triage tree, the FULL pipeline and its three human gates, where
+state lives, the context-loading decision, and the budget model.
+[`CHANGELOG.md`](CHANGELOG.md) is what changed and why;
+[`docs/evaluations/`](docs/evaluations/) is the measured record each change came
+from.
+
 ---
 
 ## Install
@@ -170,7 +177,10 @@ folders.**
    - **Empty** → the map is current. Trust it. **Do not re-read the folder.**
    - **Non-empty** → re-read **only the files it named** (≤10 tool calls),
      update `last_commit`.
-4. No map → generate that one folder's map, then proceed.
+4. No map → **the orchestrator** generates that one folder's map before any
+   executor spawns. Not the node that noticed: every node is a leaf and cannot
+   spawn `init`, so a map left to "whoever touches it first" is a map that never
+   gets written.
 5. Reading outside the in-scope folders is a **forbidden action**. Grep
    `docs/REGISTRY.md` for the `FEAT:`/`MOD:` tags instead, or read the
    neighbouring folder's map.
@@ -210,7 +220,12 @@ ORCHESTRATOR (main thread)
   │    zero frontend agents.
   │     ⏸ YOU APPROVE SCOPE ⏸   silence is not approval
   │
-  ├─ git worktree add ../tg-<slug>-<id>      one per task, never shared
+  ├─ INIT ×folders ──────► .team-irfan/context/<slug>.md
+  │    One map per in-scope folder that lacks one. A leaf cannot spawn init,
+  │    so this happens here or it never happens at all.
+  │
+  ├─ git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
+  │    One per task, never shared. Branches inherit the goal's type.
   │
   ├─ EXECUTOR ×N ─────────► change-summary.md + GATE PASS
   │    Independent ones run concurrently. Ponytail rules: reuse before writing,
@@ -222,18 +237,29 @@ ORCHESTRATOR (main thread)
   │    FAIL → same executor, same worktree, with the bug block.
   │           Max 2 retries, then ESCALATE. No silent loops.
   │
-  ├─ git merge --squash · worktree remove
-  │    Whole feature lands as ONE commit, with the docs/REGISTRY.md entry
-  │    in the same commit.
+  ├─ git merge --squash · commit · worktree remove
+  │    ONE COMMIT PER TASK. --squash collapses a single worktree's own
+  │    in-progress commits — it is not a way to fold separate tasks together.
+  │    The docs/REGISTRY.md entry is staged with the last task's commit.
   │
   ├─ LEAD ────────────────► review of the MERGED diff + report.md
   │    Reviews the merged diff, not each worktree — the bug that matters is the
   │    one two tasks create together. Max 2 review rounds.
   │     ⏸ YOU SIGN OFF ⏸    breaking change = blocker, never a footnote
   │
+  ├─ SHIP BLOCK ──────────► printed, and docs/handoff/<date>-<slug>.md
+  │    What landed · How to run · How to test · Proof · Not done · Verdict.
+  │    "How to test" is the literal paste-able command. "Proof" is pasted
+  │    gate.sh output, never a summary of it.
+  │
   └─ RETRO ───────────────► lessons.md, shown to you.
                             Never edits CLAUDE.md, a skill, or a hook.
 ```
+
+One progress line reaches you as each node returns —
+`[3/10] pjm done · 5 tasks · budget 12/60`. Node, one fact, budget. A run that
+prints nothing between "starting" and a commit appearing is a run you have to
+audit out of git, which costs more than the run saved.
 
 ---
 
@@ -297,7 +323,16 @@ Every agent carries an identical forbidden-actions block:
 - **Agents never read whole trees.** Context maps first, then `docs/REGISTRY.md`
   by tag (`head -40`, `grep -n "FEAT:"`, `sed -n` the hits — never `cat`), then
   targeted files.
+- **More tasks is more overhead, not more parallelism.** Each task buys a
+  worktree, an executor, a tester and a merge. Splitting is for work that
+  genuinely cannot share a file — never for work that merely can be described in
+  more sentences. PjM prints the projection in the SCOPE block so the cap is
+  raised with the number visible, not discovered at call 150.
 - **Retry limit 2, then escalate.** No silent loops.
+- **Wall clock is measured, not capped.** Executors report elapsed minutes and
+  must justify anything over 15. There is no hard abort: an agent cannot watch a
+  clock while a tool call is in flight, so a prompt-level timeout is theatre. The
+  number exists to tell scope from thrash.
 - Reports are always four questions — Done / Fine or not / Blockers / Next —
   plus a verdict line.
 
@@ -326,18 +361,20 @@ fills only Conventions, Purpose, and Key files (things that need reading code).
 
 Default, overridable per-project in `.team-irfan/config.md`:
 
-| node | model | why |
-|---|---|---|
-| router / orchestrator | opus | triage is the highest-leverage decision here |
-| pm | opus | inventing a business rule is the most expensive failure |
-| lead | opus | merge review, breaking-change judgement |
-| init | opus | convention extraction is all judgement |
-| evaluation | opus | reads the record, proposes changes |
-| pjm, executor, tester, solo-executor, retro | sonnet | bounded work against a written spec |
+**`opus` is the default for every node.** It does not need a reason; a downgrade
+does.
 
-The orchestrator passes `model` explicitly on each spawn. The `model:` line in a
-role file is documentation — these files aren't registered subagents, so nothing
-parses their frontmatter.
+| | model | when |
+|---|---|---|
+| every node | `opus` | default |
+| any node | `sonnet` | only when **all three** hold: it reads a spec it does not have to interpret · ≤2 files in scope · no schema, contract, auth or security surface. The reason gets printed in the ledger. |
+| any node | `fable` | the account is at its Opus cap. This is the fallback **for** opus, not a cheaper tier — say so: `exec-3 fable (opus capped)` |
+| any node | `haiku` | never. A node that cheap is a bash command, not an agent. |
+
+Overridable per-project in `.team-irfan/config.md`, but `agents/router.md` wins
+over any matrix. The orchestrator passes `model` explicitly on each spawn — the
+`model:` line in a role file is documentation, since these files aren't
+registered subagents and nothing parses their frontmatter.
 
 ---
 
@@ -352,8 +389,11 @@ skills/      guardrails/   engineering rules every node obeys
              context-loading/   the map-first rule
 templates/   brief · task-spec · change-summary · test-report
              report · lessons · config · context-map · metrics.json
-runs/        runs/<yyyymmdd-slug>/  — all state for one run
+runs/        runs/<yyyymmdd-slug>/  — all state for one run (local, gitignored)
 tests/       fixture/ · run-checks.sh · cases.md
+docs/        workflow.md   the visual walkthrough
+             evaluations/  what past runs measured, and what changed because of it
+CHANGELOG.md what changed in each version of the workflow
 ```
 
 A run directory holds `brief.md`, `tasks.md`, `task-<id>.md`,
@@ -389,9 +429,17 @@ guardrails are written for that stack.
 
 ## Status
 
-Built and verified check-by-check. **A full end-to-end FULL run has not been
-exercised** — every component is tested in isolation, but the orchestrator's
-complete sequence is still unproven. Start with FAST tasks.
+**v2.1.0.** One end-to-end FULL run has now been exercised — a five-folder
+backend feature. It shipped, and it cost 150 tool calls against a 60-call design
+budget while writing zero context maps and reporting nothing back. Everything
+that run exposed is fixed in v2.1.0; the measured record is
+[`docs/evaluations/2026-08-15-user-block-unblock.md`](docs/evaluations/2026-08-15-user-block-unblock.md)
+and the changes are in [`CHANGELOG.md`](CHANGELOG.md).
+
+So: the sequence is proven to run, and proven to have been over-budget once.
+n=1 — the routing rubric has no evidence behind it yet. Keep using
+`/team-irfan-evaluation` after runs; the numbers only start meaning something
+around five.
 
 Nested subagent spawning is unverified in this harness; the star topology means
 it doesn't matter.
