@@ -162,9 +162,23 @@ Curated. Loading a skill costs calls, so no node loads one it does not need.
 runs its own nodes. Also excluded: `dataviz`, `artifact-*`, `figma-axi`,
 `lavish`, `simplify` — out of scope for this graph.
 
-**RTK** is wired inside `gate.sh` (`rtk test`, `rtk err`) to keep gate output
-small. Agents do not call it directly; the global PreToolUse hook already
-rewrites their Bash calls.
+**RTK is deliberately kept out of `gate.sh`.** Measured, not assumed:
+
+```
+$ rtk test bash -c 'exit 1'   ; echo $?   →  0     # child failure swallowed
+$ rtk err  bash -c 'exit 3'   ; echo $?   →  3     # remapped, not passed through
+```
+
+A gate that trusts `rtk test` reports green on red. `gate.sh` calls
+`tsc`/`vitest`/`jest` raw and caps its own output at 40 lines instead. The
+global PreToolUse hook passes `bash gate.sh` through unchanged (`rtk rewrite`
+returns 1 = no equivalent), so the gate is never rewritten out from under
+itself.
+
+The trap that remains is on **agents**: a bare `npx vitest run` typed by a node
+gets rewritten to `rtk vitest run` and can look green while red. Every executor
+and tester prompt says so. `gate.sh` output is the only test evidence any node
+may report.
 
 ---
 

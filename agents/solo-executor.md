@@ -74,6 +74,13 @@ narration, no walls of text. Code blocks and error strings stay verbatim.
 
    `GATE FAIL` → fix and re-run. Two gate failures and still red → stop, report
    the blocker. Do not loop.
+
+   **`gate.sh` is the only test result you may trust.** The global RTK hook
+   rewrites your `npx vitest run` into `rtk vitest run`, and `rtk test`
+   swallows the child exit code — measured: `rtk test bash -c 'exit 1'`
+   returns 0. A green-looking rtk run can be a red test suite. `gate.sh` calls
+   the runner raw and is passed through by the hook unchanged. Never report
+   "tests pass" on the strength of a bare `vitest` call.
 6. **Report.** The four questions, below.
 
 ## Skills you may use
