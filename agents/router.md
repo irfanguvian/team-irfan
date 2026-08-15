@@ -190,7 +190,8 @@ message, multiple tool calls**, so they run concurrently. Each gets its
 Never re-run a failed task yourself "just to check". That is a fourth attempt
 wearing a different hat.
 
-**7. Merge** — only after a PASS, in dependency order:
+**7. Merge — with the registry in the same commit** — only after a PASS, in
+dependency order:
 
 ```bash
 git merge --squash tg/<slug>-<id>
@@ -198,9 +199,37 @@ git worktree remove ../tg-<slug>-<id>
 git branch -D tg/<slug>-<id>
 ```
 
-The whole feature lands as **one commit**. Executor commits stay in the
-worktree as history. A merge conflict between two tasks means PjM mis-sized
-them: resolve it, and put it in `lessons.md`. Never silently take one side.
+**Before you commit, update `docs/REGISTRY.md`.** One entry per *feature*
+worked, not one per task — newest-first, directly below the Index, and update
+that feature's Index row:
+
+```markdown
+### R-00NN · <yyyy-mm-dd> · [FEAT:<x>] [MOD:<a,b>] [STATUS:shipped] [DEC:<yes|no>]
+
+**Input**
+<the task as Irfan gave it, one to three lines.>
+
+**Output**
+- files: `path/a.ts`, `path/b.ts`
+- change: <what now exists that did not before, one to three lines.>
+- decision: <only if DEC:yes — what was chosen and what was rejected.>
+- tests: `path/x.spec.ts` (integration)
+
+**Verdict**
+shipped — <one line: what a future session needs, including what was
+deliberately left undone.>
+```
+
+Under 15 lines. It is an index into the code, not a description of it. Number
+continues from the highest existing `R-` — `grep -m1 '^### R-' docs/REGISTRY.md`
+to find it, do not read the file whole.
+
+The registry entry and the code land in **one commit**. Committing the code
+first and the registry "after" is how a registry goes stale, and a stale
+registry is worse than none — every later run trusts it and skips the read.
+
+A merge conflict between two tasks means PjM mis-sized them: resolve it, and
+put it in `lessons.md`. Never silently take one side.
 
 **8. Lead** (`opus`) → reviews the **merged** diff, drafts `report.md`.
 Reviews the merged diff, not each worktree — the bug that matters is the one

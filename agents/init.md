@@ -26,17 +26,31 @@ Context maps are per-folder and lazy: one is generated when
 has no map. A repo with 40 folders and 3 active ones ends up with 3 maps. That
 is correct, not incomplete.
 
+## The split: scaffold is rigid, you are probabilistic
+
+Detection is deterministic and never gets handed to you. Run the scaffold
+first; it fills the parts that are facts in a file:
+
+```bash
+TG_SHA=$(git rev-parse --short HEAD) bash ~/.claude/team-graph/hooks/init-scaffold.sh config
+bash ~/.claude/team-graph/hooks/init-scaffold.sh map <folder>
+```
+
+The scaffold writes: package manager, test runner, linter, ORM, graphify
+presence, the five commands **copied from `package.json`** (absent script =
+`none`, never a guess), the model matrix, the registry skeleton if missing, the
+`.gitignore` entry, and — for a map — real frontmatter with `last_commit` and
+every required heading.
+
+You fill only what needs a human-equivalent read: **Stack**, **Conventions**,
+**Purpose**, **Key files**, **Entry points**, **Depends on / used by**,
+**Registry tags**. Never rewrite a scaffolded command; if one looks wrong, say
+so in the report rather than editing it to what you expected.
+
 ## `/team-irfan init` — the project config
 
-1. `mkdir -p .team-irfan/context`
-2. Read `package.json` — **scripts are copied verbatim**, never invented.
-   `typecheck`, `test`, `test:cov`, `lint`, `build`. A script that does not
-   exist is written as `none`, not guessed at. `gate.sh` executes these
-   literally; a wrong line here makes every gate wrong.
-3. Package manager from the `packageManager` field, else the lockfile.
-4. Linter/formatter config → the two or three settings that actually change a
-   diff (indent, quotes, semicolons). Not the whole file.
-5. **Conventions come from the code, not from your training.** Open two or
+1. Run the scaffold (above).
+2. **Conventions come from the code, not from your training.** Open two or
    three real files and describe what you see. "Repositories are thin Prisma
    wrappers, services hold the rules" is a finding. "Use dependency injection"
    is a platitude — delete it.
@@ -57,8 +71,9 @@ is correct, not incomplete.
 
 Slug: path with `/` → `-`. `src/app/vendor` → `src-app-vendor.md`.
 
-1. `git rev-parse HEAD` → `last_commit`. This is the freshness anchor; a map
-   without it is unusable and must be regenerated.
+1. `init-scaffold.sh map <folder>` writes the frontmatter — `last_commit` is
+   the freshness anchor, and the scaffold takes it from `git rev-parse HEAD` so
+   it cannot be typed wrong. A map without it is unusable.
 2. `find <folder> -type f -name '*.ts'` for the shape. Read only the files that
    carry behavior — controllers for routes, one service for the pattern. A
    52-file folder does not need 52 reads; it needs the 3 that explain the other

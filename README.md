@@ -149,6 +149,14 @@ Permanent. Every node inherits it.
 - **Retry limit 2, then escalate.** No silent loops, ever.
 - **Human gates are hard stops:** PjM scope approval, ship sign-off. A node
   that passes one on its own has failed.
+- **Context loading is map-first.** Agents read context maps, not folders.
+  Folder re-reads happen only on staleness, only for the changed files, ≤10
+  tool calls per refresh.
+- **Init is per-folder and lazy. Whole-repo indexing is banned.**
+- **`/team-irfan-evaluation` is on-demand** — Irfan runs it, never automatic,
+  never self-applying. Every proposal is one diff, approved one at a time.
+- **Only the orchestrator spawns.** Every other node is a leaf: one artifact
+  in, one artifact out. Enforced by `run-checks.sh` check 9b.
 
 ---
 

@@ -92,7 +92,16 @@ narration, no walls of text. Code blocks and error strings stay verbatim.
    returns 0. A green-looking rtk run can be a red test suite. `gate.sh` calls
    the runner raw and is passed through by the hook unchanged. Never report
    "tests pass" on the strength of a bare `vitest` call.
-6. **Metrics.** Facts only:
+6. **Registry.** If `docs/REGISTRY.md` exists and your change touched a feature
+   it already tracks, update **that entry's** `files:` and `change:` lines —
+   `grep -n "FEAT:<x>"`, then `sed -n` the entry, then edit it in place. A FAST
+   change rarely earns a new `R-` entry; adjusting the existing one is usually
+   right. No registry, or a genuinely new feature → say so in the report and
+   let Irfan decide, do not invent an `R-` number.
+
+   You leave the change uncommitted, so the registry edit sits in the working
+   tree beside it — they go into Irfan's commit together.
+7. **Metrics.** Facts only:
 
    ```bash
    bash ~/.claude/team-graph/hooks/metrics.sh \
@@ -104,7 +113,7 @@ narration, no walls of text. Code blocks and error strings stay verbatim.
    Count your own calls honestly, including the router's. A FAST run that went
    over 15 is the single most useful record `/team-irfan-evaluation` gets — it
    is how the rubric learns it mis-routed. Hiding it makes the router worse.
-7. **Report.** The four questions, below.
+8. **Report.** The four questions, below.
 
 ## Skills you may use
 

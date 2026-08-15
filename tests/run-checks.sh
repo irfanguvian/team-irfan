@@ -19,10 +19,13 @@ ok()   { PASS=$((PASS+1)); echo "  PASS  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 head2() { echo; echo "── $1"; }
 
+# The harness must leave the fixture exactly as it found it. A check run that
+# mutates the repo it lives in makes the next run test something different.
 cleanup() {
   rm -f "$FIXTURE/src/stub.test.ts" "$FIXTURE/src/typeerror.ts"
   git -C "$FIXTURE" checkout -- src 2>/dev/null
   [ -f "$FIXTURE/src/cart.test.ts.bak" ] && mv "$FIXTURE/src/cart.test.ts.bak" "$FIXTURE/src/cart.test.ts"
+  rm -rf "$FIXTURE/.team-irfan" "$FIXTURE/docs" "$FIXTURE/.gitignore"
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -126,6 +129,101 @@ if [ -f "$TG/tests/cases.md" ]; then
 else
   bad "cases.md missing"
 fi
+
+# ── 6. init scaffold: config.md with real detected commands ──────────────────
+head2 "6. init-scaffold config → real commands from package.json"
+cd "$FIXTURE" || exit 2
+rm -rf .team-irfan
+OUT=$(TG_SHA=testsha bash "$TG/hooks/init-scaffold.sh" config 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "exit 0" || { bad "exit $RC"; echo "$OUT"; }
+CFG="$FIXTURE/.team-irfan/config.md"
+if [ -f "$CFG" ]; then
+  ok "config.md written"
+  # keys are column-padded, so match "<key><spaces>: <value>"
+  grep -qE '^typecheck *: npm typecheck$' "$CFG" && ok "typecheck command detected verbatim" || bad "typecheck line wrong: $(grep -m1 '^typecheck' "$CFG")"
+  grep -qE '^test *: npm test$'           "$CFG" && ok "test command detected verbatim"      || bad "test line wrong: $(grep -m1 '^test ' "$CFG")"
+  grep -qE '^coverage *: none$'           "$CFG" && ok "absent script written as none, not guessed" || bad "coverage should be none: $(grep -m1 '^coverage' "$CFG")"
+  grep -q 'test runner | vitest'        "$CFG" && ok "runner detected"    || bad "runner not detected"
+  for h in '## Stack' '## Commands' '## Conventions' '## Registry' '## Model matrix' '## Overrides'; do
+    grep -qF "$h" "$CFG" && ok "config heading $h" || bad "config missing $h"
+  done
+else
+  bad "config.md not written"
+fi
+
+# ── 6b. init scaffold: context map, headings + 80-line cap ───────────────────
+head2 "6b. init-scaffold map → headings present, ≤80 lines, real last_commit"
+OUT=$(bash "$TG/hooks/init-scaffold.sh" map src 2>&1); RC=$?
+MAP="$FIXTURE/.team-irfan/context/src.md"
+[ "$RC" -eq 0 ] && [ -f "$MAP" ] && ok "map written" || { bad "map not written (rc=$RC)"; echo "$OUT"; }
+if [ -f "$MAP" ]; then
+  for h in '## Purpose' '## Key files' '## Entry points' '## Conventions' '## Depends on / used by' '## Registry tags'; do
+    grep -qF "$h" "$MAP" && ok "map heading $h" || bad "map missing $h"
+  done
+  grep -qE '^last_commit: [0-9a-f]{7,40}$' "$MAP" && ok "last_commit is a real sha" || bad "last_commit missing/!sha: $(grep -m1 last_commit "$MAP")"
+  grep -qE '^folder: src$'                 "$MAP" && ok "folder recorded"           || bad "folder line wrong"
+  L=$(wc -l < "$MAP" | tr -d ' ')
+  [ "$L" -le 80 ] && ok "map is $L lines (cap 80)" || bad "map is $L lines, over the 80 cap"
+fi
+grep -q '^\.team-irfan/' "$FIXTURE/.gitignore" 2>/dev/null && ok ".team-irfan gitignored by init" || bad ".team-irfan not gitignored"
+rm -rf "$FIXTURE/.team-irfan"
+
+# ── 7. staleness detection, both directions ──────────────────────────────────
+head2 "7. freshness check: changed folder stale, untouched folder fresh"
+G="$TMP/staleness"
+mkdir -p "$G/touched" "$G/untouched"
+git -C "$G" init -q 2>/dev/null
+echo 'a' > "$G/touched/a.ts"; echo 'b' > "$G/untouched/b.ts"
+git -C "$G" add -A >/dev/null 2>&1
+git -C "$G" -c user.name=t -c user.email=t@t commit -qm base >/dev/null 2>&1
+BASE=$(git -C "$G" rev-parse HEAD)
+echo 'a2' >> "$G/touched/a.ts"
+git -C "$G" add -A >/dev/null 2>&1
+git -C "$G" -c user.name=t -c user.email=t@t commit -qm change >/dev/null 2>&1
+
+STALE=$(git -C "$G" diff --name-only "$BASE" -- touched)
+FRESH=$(git -C "$G" diff --name-only "$BASE" -- untouched)
+[ -n "$STALE" ] && ok "changed folder reports stale ($STALE)" || bad "changed folder reported fresh — refresh would never fire"
+[ -z "$FRESH" ] && ok "untouched folder reports fresh"        || bad "untouched folder reported stale ($FRESH) — every run would re-read it"
+
+# ── 8. metrics.json validates against the schema keys ────────────────────────
+head2 "8. metrics.sh output matches the schema"
+MRUN="$TMP/metrics-run"
+bash "$TG/hooks/retry-guard.sh" "$MRUN" T1 >/dev/null 2>&1
+OUT=$(bash "$TG/hooks/metrics.sh" "$MRUN" FAST 18 15 \
+        folders=src context_maps_used=src gate_fails="unit tests:boundary case" shipped=true 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "exit 0" || { bad "exit $RC"; echo "$OUT"; }
+if node -e '
+  const m = require(process.argv[1]);
+  const need = ["id","date","route","folders","tool_calls","budget","over_budget",
+                "gate_fails","retries","escalated","context_maps_used","maps_refreshed",
+                "human_overrides","shipped"];
+  const missing = need.filter(k => !(k in m));
+  if (missing.length) { console.error("missing: " + missing.join(",")); process.exit(1); }
+  if (m.over_budget !== true) { console.error("over_budget not derived (18 > 15)"); process.exit(1); }
+  if (m.retries !== 1) { console.error("retries not read from retries.json, got " + m.retries); process.exit(1); }
+  if (m.gate_fails[0].reason !== "boundary case") { console.error("gate_fails reason truncated"); process.exit(1); }
+' "$MRUN/metrics.json" 2>"$TMP/merr"; then
+  ok "all 14 keys, over_budget derived, retries sourced, reason with spaces intact"
+else
+  bad "schema: $(cat "$TMP/merr")"
+fi
+
+# ── 9. every agent declares model + carries the forbidden block ──────────────
+head2 "9. agents: model frontmatter + universal forbidden block + leaf clause"
+for f in "$TG"/agents/*.md; do
+  a=$(basename "$f" .md); miss=""
+  grep -q '^model: \(opus\|sonnet\|haiku\)$'      "$f" || miss="$miss model:"
+  grep -q '^## Forbidden actions (identical'      "$f" || miss="$miss forbidden-block"
+  [ "$a" = router ] || grep -q '^## You are a leaf' "$f" || miss="$miss leaf-clause"
+  [ -z "$miss" ] && ok "$a.md" || bad "$a.md missing:$miss"
+done
+
+# ── 9b. only the orchestrator may spawn ──────────────────────────────────────
+head2 "9b. spawn instructions confined to the orchestrator"
+SPAWNERS=$(grep -l 'Agent(' "$TG"/agents/*.md | xargs -n1 basename | grep -v '^router\.md$')
+[ -z "$SPAWNERS" ] && ok "only router.md contains an Agent( call" \
+                   || bad "leaf nodes instructing a spawn: $SPAWNERS"
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo
