@@ -118,8 +118,20 @@ deterministic check.
 
 Permanent. Every node inherits it.
 
-- **Fast path: ≤15 tool calls.** Full path: **≤60 per feature.** Each node's
-  own budget is written in its prompt frontmatter.
+- **Fast path: ≤15 tool calls.** Full path: **≤60 per feature**, everyone's
+  calls included. Lead keeps the ledger in `tasks.md` and stops at 60 — a
+  partial `report.md` with the rest in Blockers, never a silent overrun.
+- **Per-node budgets are ceilings, not allowances**, and they deliberately do
+  not sum to 60:
+
+  | router | pm | pjm | lead | executor | tester | retro |
+  |---|---|---|---|---|---|---|
+  | 4 | 10 | 8 | 20 | 15 ×task ×attempt | 12 ×task ×attempt | 5 |
+
+  A 2-task feature at every ceiling would spend ~100. No run may spend every
+  ceiling. Roughly `20 + 27×tasks` is the realistic projection — over 60 means
+  Lead asks Irfan to raise the cap or cut scope **before** the first worktree,
+  not after.
 - **Router must HAND-BACK when manual is faster.** Under ~5 minutes of human
   work, or too ambiguous to triage — one line, then stop. Running the graph on
   a typo is the most expensive failure mode there is.

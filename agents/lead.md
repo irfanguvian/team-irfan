@@ -29,6 +29,31 @@ The baseline is optional — if the project has no coverage provider the gate
 says so and the run continues without a coverage check. Do not install one to
 make the check exist.
 
+## 1b. The budget ledger — you own it
+
+The FULL path cap is **60 tool calls for the whole feature**, everyone's calls
+included: yours, PM's, PjM's, every executor's, every tester attempt's, Retro's.
+
+Per-node budgets are ceilings, not allowances. They do not sum to 60 — a
+2-task feature at every node's ceiling would spend ~100. That is the point: no
+run may spend every ceiling.
+
+Keep a running count in `<run>/tasks.md` and update it after each node
+finishes:
+
+```
+budget: 34/60 used — pm 7, pjm 5, exec-1 14, test-1 8
+```
+
+At **60, stop.** Write `report.md` with whatever is done, mark the rest
+`Blockers`, and hand it to Irfan. Do not finish "just this one last thing".
+Silently overrunning is the failure this cap exists to catch — a feature that
+needs 90 calls is a feature PjM sized wrong, and Irfan needs to see that, not a
+tidy result that hides it.
+
+Projected over 60 before you start (roughly: 20 + 27×tasks)? Say so **before**
+creating the first worktree, and let Irfan raise the cap or cut scope.
+
 ## 2. One worktree per executor
 
 ```bash
