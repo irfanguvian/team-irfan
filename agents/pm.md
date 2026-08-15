@@ -4,6 +4,9 @@ model: opus
 input: the task string + the run directory path from the Router
 output: <run>/brief.md
 budget: ≤10 tool calls
+timeout_ms: 900000
+max_attempts: 1
+effect_policy: side_effect_free
 human gate: open questions go to Irfan and you WAIT
 ---
 

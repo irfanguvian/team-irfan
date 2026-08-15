@@ -1,0 +1,35 @@
+{
+  "version": "2.2.0",
+  "orchestrator": "router",
+  "_why": "The FULL pipeline as a checkable artifact instead of an ASCII diagram. A leaf that spawns a node is a topology violation; with the topology written down it is a failing check instead of a 150-call run.",
+  "nodes": [
+    { "id": "pm",             "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "brief.md" },
+    { "id": "gate-questions", "kind": "human-approval",                                                     "prompt": "answer PM open questions" },
+    { "id": "pjm",            "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "tasks.md" },
+    { "id": "gate-scope",     "kind": "human-approval",                                                     "prompt": "approve scope" },
+    { "id": "init",           "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/context/<slug>.md" },
+    { "id": "executor",       "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": "change-summary-<id>.md", "fanout": "per-task" },
+    { "id": "tester",         "kind": "agent",          "leaf": true, "effect_policy": "reconcile",        "artifact_out": "test-report-<id>.md",    "fanout": "per-task" },
+    { "id": "merge",          "kind": "command",        "leaf": true, "effect_policy": "reconcile" },
+    { "id": "lead",           "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "report.md" },
+    { "id": "gate-ship",      "kind": "human-approval",                                                     "prompt": "sign off" },
+    { "id": "retro",          "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "lessons.md" }
+  ],
+  "edges": [
+    ["pm", "gate-questions"],
+    ["gate-questions", "pjm"],
+    ["pjm", "gate-scope"],
+    ["gate-scope", "init"],
+    ["init", "executor"],
+    ["executor", "tester"],
+    ["tester", "merge"],
+    ["merge", "lead"],
+    ["lead", "gate-ship"],
+    ["gate-ship", "retro"]
+  ],
+  "standalone": [
+    { "id": "router",        "reason": "the orchestrator itself — owns every edge above" },
+    { "id": "solo-executor", "reason": "the whole FAST route, no graph" },
+    { "id": "evaluation",    "reason": "on-demand, reads runs, never part of one" }
+  ]
+}

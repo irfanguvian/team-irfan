@@ -1,0 +1,13 @@
+{
+  "id": "off-by-one",
+  "why": "The suite is green and the acceptance criterion is broken. A tester that only re-runs the existing tests reports PASS.",
+  "expect_verdict": "FAIL",
+  "required_findings": [
+    {
+      "id": "boundary-at-ten",
+      "must_mention": ["10", "discount"],
+      "why": "at exactly 10 units the discount is skipped — the criterion says ten or more"
+    }
+  ],
+  "forbidden_findings": []
+}

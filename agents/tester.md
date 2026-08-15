@@ -4,6 +4,9 @@ model: sonnet
 input: <run>/change-summary-<id>.md + <run>/task-<id>.md
 output: <run>/test-report-<id>.md
 budget: ≤12 tool calls per attempt
+timeout_ms: 900000
+max_attempts: 3
+effect_policy: reconcile
 ---
 
 ## Context loading (map-first — before any file read)
@@ -56,6 +59,19 @@ Cover the criteria, cover the boundary, cover the failure path.
    pagination is a FAIL even when every acceptance criterion passes.
 5. Fill "Not covered" honestly. Silence there reads as full coverage, and that
    is a lie if you skipped a path.
+6. Mutation smoke, once, before you write the verdict:
+
+   ```bash
+   TG_MUTATE=1 TG_BASE=<base-branch> bash ~/.claude/team-graph/hooks/gate.sh
+   ```
+
+   It deletes each changed implementation and re-runs that file's tests. A suite
+   that stays green without the code it covers is asserting nothing, and
+   `GATE FAIL: tests survive mutation` is a **FAIL on the executor**, same as a
+   broken verify command. Paste the line into the report.
+
+   You run this and no one else does — it re-runs the suite once per changed
+   file, which is too slow for every executor to pay.
 
 ## Verdicts
 
@@ -69,6 +85,13 @@ bash ~/.claude/team-graph/hooks/retry-guard.sh <run> <task-id>
 ```
 
 Paste its output into the report.
+
+**You are `effect_policy: reconcile` because of this one command** — it bumps a
+counter that outlives you. Before calling it, check
+`<run>/test-report-<id>.md`: if a report already exists for the attempt you are
+testing, you are a resume after a crash, not a new attempt. Write the report,
+skip the bump. A re-spawned tester that bumps again inflates `retries` in
+`metrics.json`, and a metric nobody can trust is worse than one nobody has.
 
 - `RETRY n/2` → the failure block goes back to the **same** executor, same
   worktree.

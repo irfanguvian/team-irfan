@@ -1,0 +1,18 @@
+{
+  "id": "mock-only",
+  "why": "Two green tests that assert on a mock's call log and never on a return value, plus an untested acceptance criterion. This is the failure gate.sh cannot see: the tests are syntactically fine.",
+  "expect_verdict": "FAIL",
+  "required_findings": [
+    {
+      "id": "asserts-on-mock",
+      "must_mention": ["mock"],
+      "why": "both cases assert toHaveBeenCalled, never the returned boolean"
+    },
+    {
+      "id": "null-email-uncovered",
+      "must_mention": ["null"],
+      "why": "the second acceptance criterion — null address returns false, sends nothing — has no case at all"
+    }
+  ],
+  "forbidden_findings": []
+}

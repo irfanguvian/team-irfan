@@ -1,0 +1,9 @@
+{
+  "id": "clean",
+  "why": "Correct implementation, real assertions, every acceptance criterion covered. The false-positive guard: an agent that flags something here is not a good reviewer, it is a noisy one, and noise is what makes a human stop reading the reports.",
+  "expect_verdict": "PASS",
+  "required_findings": [],
+  "forbidden_findings": [
+    { "id": "any-bug", "must_mention": ["BUG-"], "why": "there is no bug to find" }
+  ]
+}

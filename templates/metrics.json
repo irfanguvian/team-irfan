@@ -7,10 +7,15 @@
   "budget": 0,
   "over_budget": false,
   "gate_fails": [],
+  "gate_caught": 0,
   "retries": 0,
   "escalated": false,
   "context_maps_used": [],
   "maps_refreshed": [],
   "human_overrides": [],
-  "shipped": false
+  "shipped": false,
+  "route_outcome": "correct|should-have-run|should-have-handed-back|wrong-tier",
+  "human_minutes": null,
+  "review_rounds": null,
+  "post_ship_fix": null
 }

@@ -8,8 +8,16 @@
 #
 # State lives in <run-dir>/retries.json, keyed by task id. The agent holds no
 # counter of its own; kill it mid-run and the count survives.
+#
+# Concurrent testers bump different task ids into the SAME file, so the atomic
+# rename below is not enough on its own: both would read the same state, both
+# would write a correct file, and one task's count would vanish. The lock is
+# what makes the count survive a parallel run, not just a kill.
 
 set -uo pipefail
+
+# shellcheck source=../lib/atomic.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/atomic.sh"
 
 RUN_DIR="${1:-}"
 TASK_ID="${2:-}"
@@ -22,20 +30,26 @@ fi
 
 mkdir -p "$RUN_DIR"
 STATE="$RUN_DIR/retries.json"
-[ -f "$STATE" ] || echo '{}' > "$STATE"
+# No pre-seeding with '{}': that write races the bump below and can clobber a
+# counter another process already incremented. bump() treats a missing or
+# unreadable file as empty, which is the same thing without the race.
 
-N=$(TG_TASK="$TASK_ID" node -e '
-  const fs = require("fs");
-  const file = process.argv[1];
-  const id = process.env.TG_TASK;
-  let state = {};
-  try { state = JSON.parse(fs.readFileSync(file, "utf8")) || {}; } catch { state = {}; }
-  state[id] = (state[id] || 0) + 1;
-  const tmp = file + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
-  fs.renameSync(tmp, file);   // atomic replace, no half-written counter
-  console.log(state[id]);
-' "$STATE" 2>/dev/null)
+bump() {
+  TG_TASK="$TASK_ID" node -e '
+    const fs = require("fs");
+    const file = process.argv[1];
+    const id = process.env.TG_TASK;
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(file, "utf8")) || {}; } catch { state = {}; }
+    state[id] = (state[id] || 0) + 1;
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n");
+    fs.renameSync(tmp, file);   // atomic replace, no half-written counter
+    console.log(state[id]);
+  ' "$STATE" 2>/dev/null
+}
+
+N=$(with_lock "$STATE" bump)
 
 if [ -z "$N" ]; then
   echo "retry-guard: could not update $STATE" >&2

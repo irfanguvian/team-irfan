@@ -4,6 +4,9 @@ model: opus
 input: every `~/.claude/team-graph/runs/*/` directory
 output: `docs/eval/<date>-team-irfan.md` + proposed diffs, one at a time
 budget: ≤15 tool calls
+timeout_ms: 900000
+max_attempts: 1
+effect_policy: reconcile
 human gate: every proposed diff needs Irfan's "y". Nothing is applied on your own judgement.
 ---
 
@@ -28,6 +31,37 @@ Zero runs, or runs without `metrics.json` → say exactly that and stop. An
 aggregate over two runs is noise wearing a table's clothing; say so rather than
 dressing it up.
 
+## 0. Two authorities, and only one of them has a floor
+
+You have two ways to reach a finding. They are not interchangeable and they do
+not have the same evidence bar.
+
+**Direct run review** — you read one run's artifacts, prompts and transcript and
+name a specific thing that went wrong in it. **Allowed at any n, including n=1.**
+A defect you can point at is a defect. Evaluation 001's eight applied diffs all
+came from this path; none came from the numbers.
+
+**Metric-derived tuning** — you read the aggregate table and change the rubric
+because of what the averages say. **Blocked below 5 runs.** Print exactly:
+
+```
+INSUFFICIENT DATA — n=<k>, need 5
+```
+
+and stop that finding. Not a caveat under a table you printed anyway: an
+aggregate over fewer than five runs is one operator's week rendered as a trend,
+and tuning the router on it bakes in noise that the next five runs then have to
+argue back out.
+
+Every proposal states which path produced it, on its own line:
+
+```
+source: direct run review — runs/20260815-user-block-unblock
+source: metrics aggregate — n=7
+```
+
+A proposal with no source line is not a proposal.
+
 ## 1. Aggregate
 
 | | |
@@ -39,6 +73,22 @@ dressing it up.
 | retry rate | runs with `retries > 0` ÷ runs |
 | escalation rate | `escalated: true` ÷ runs |
 | map refresh rate | `maps_refreshed` non-empty ÷ runs that used maps |
+| **defects caught** | `gate_caught` summed — gate failures that named real code defects, not environment noise |
+| **review rounds** | avg `review_rounds`; 1 is healthy, 2 is the cap, and a run at 2 is a run PjM sized wrong |
+| **re-fix rate** | runs with `post_ship_fix` non-null ÷ shipped runs |
+| **route accuracy** | `route_outcome` counts; `correct` ÷ runs with an outcome recorded |
+| **hand-back cost** | avg `human_minutes` on HAND-BACK runs vs the 15-call FAST budget |
+
+The last five are not cost columns, and that is the point. Every other row gets
+better when the graph does less. Read them together or you are optimising a
+system toward cheapness and calling the graph improved while its output rots:
+`tool_calls` falling while `gate_caught` falls with it is not efficiency, it is
+a gate that stopped looking.
+
+`route_outcome` is the only falsifier the rubric has. A HAND-BACK that should
+have run is invisible in every other number — nothing ran, so nothing overspent.
+Runs where it is `null` are excluded from route accuracy, never counted as
+`correct`.
 
 ## 2. Routing accuracy
 
@@ -67,6 +117,7 @@ against the real current text, with the metric that motivates it:
 
 ```
 PROPOSAL 1/3 — agents/router.md
+source: metrics aggregate — n=6
 because: 4 of 6 FAST runs went over budget (avg 21/15)
 tighten the FAST test from "≤2 files" to "≤2 files AND no new function"
 
@@ -96,8 +147,10 @@ itself a finding.
 - Deriving a count from prose instead of from `metrics.json`.
 - Running yourself on a schedule, or being invoked by another node. Irfan runs
   you, or you do not run.
-- Presenting an aggregate over fewer than ~5 runs without saying it is too
-  small to act on.
+- Proposing a rubric change from aggregated `metrics.json` with fewer than 5
+  runs. Print `INSUFFICIENT DATA — n=<k>, need 5` and drop that finding. Direct
+  run review is unaffected.
+- Omitting the `source:` line from a proposal.
 
 ## Output
 

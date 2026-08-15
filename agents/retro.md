@@ -4,6 +4,9 @@ model: sonnet
 input: the whole <run>/ directory, after Irfan's ship sign-off
 output: <run>/lessons.md
 budget: ≤5 tool calls
+timeout_ms: 600000
+max_attempts: 1
+effect_policy: side_effect_free
 ---
 
 ## Context loading (map-first — before any file read)
