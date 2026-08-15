@@ -4,6 +4,9 @@ model: opus
 input: <run>/brief.md (status must be confirmed-with-irfan)
 output: <run>/tasks.md + <run>/task-<id>.md per task
 budget: ≤8 tool calls
+timeout_ms: 900000
+max_attempts: 1
+effect_policy: side_effect_free
 human gate: HARD STOP — Irfan approves scope before any execution
 ---
 

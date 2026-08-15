@@ -20,6 +20,9 @@
 
 set -uo pipefail
 
+# shellcheck source=../lib/atomic.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/atomic.sh"
+
 MAX_LINES=40   # cap on any failing command's output, keeps agent context small
 
 fail() { echo; echo "GATE FAIL: $1"; exit 1; }
@@ -99,7 +102,18 @@ fi
 
 # ------------------------------------------------- 3+4. unit tests, coverage
 
-COV_BASE="${TG_RUN:-}/coverage-base.txt"
+# The run-wide baseline is written once from the project root. A gate run inside
+# a tg-* worktree records to its OWN file instead, so a resumed run re-recording
+# the baseline cannot rewrite the file concurrent executors are reading against —
+# a torn read there produces a wrong PASS, which is worse than a crash.
+COV_SHARED="${TG_RUN:-}/coverage-base.txt"
+COV_BASE="$COV_SHARED"
+case "$(basename "$(pwd)")" in
+  tg-*) COV_BASE="${TG_RUN:-}/coverage-base-$(basename "$(pwd)").txt" ;;
+esac
+# reading: prefer this worktree's own baseline, fall back to the run's
+[ "${TG_RECORD_BASE:-}" = "1" ] || [ -f "$COV_BASE" ] || COV_BASE="$COV_SHARED"
+
 NEED_COV=no
 [ -n "${TG_RUN:-}" ] && [ -f "$COV_BASE" ] && NEED_COV=yes
 [ "${TG_RECORD_BASE:-}" = "1" ] && NEED_COV=yes
@@ -134,7 +148,7 @@ if [ "${TG_RECORD_BASE:-}" = "1" ]; then
   [ -n "${TG_RUN:-}" ] || fail "TG_RECORD_BASE=1 needs TG_RUN"
   [ -f "$SUMMARY" ] || fail "no coverage-summary.json produced — is a coverage provider installed?"
   mkdir -p "$TG_RUN"
-  cp "$SUMMARY" "$COV_BASE"
+  atomic_cp "$SUMMARY" "$COV_BASE" || fail "could not write the coverage baseline"
   echo "gate: coverage baseline written to $COV_BASE"
   echo
   echo "GATE PASS"
@@ -211,7 +225,96 @@ else
   echo "gate: stub scan ok ($(printf '%s\n' "$TEST_FILES" | wc -l | tr -d ' ') test file(s))"
 fi
 
-# ---------------------------------------------------------------- 6. verdict
+# ------------------------------------------------------- 6. mutation smoke
+
+# Opt-in (TG_MUTATE=1) because it re-runs the suite once per source file. The
+# Tester runs it; executors do not.
+#
+# The stub scan above is syntactic — it catches a test that LOOKS empty. This
+# catches the one that looks fine and asserts nothing real: delete the
+# implementation, and if the test still passes it was never testing it. That is
+# a deterministic check, so it belongs here and not in a slop-review prompt.
+
+mut_restore_all() {
+  for b in $MUT_BACKUPS; do
+    [ -f "$b" ] && mv "$b" "${b%.tg-mutant-bak}"
+  done
+  MUT_BACKUPS=""
+}
+MUT_BACKUPS=""
+trap 'rm -rf "$COV_DIR"; mut_restore_all' EXIT
+
+if [ "${TG_MUTATE:-}" = "1" ] && [ "$RUNNER" != none ]; then
+  SRC_RE='\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$'
+  if [ "${TG_SCAN:-}" = "all" ]; then
+    SRCS=$(find . -type d -name node_modules -prune -o -type f -print 2>/dev/null \
+           | grep -E "$SRC_RE" | grep -vE "$TEST_RE" | grep -vE '\.d\.ts$' | sort)
+  else
+    SRCS=$(changed_files | grep -E "$SRC_RE" | grep -vE "$TEST_RE" | grep -vE '\.d\.ts$' | sort -u)
+  fi
+
+  SURVIVED=""
+  CHECKED=0
+  while IFS= read -r src; do
+    [ -n "$src" ] && [ -f "$src" ] || continue
+    stem="${src%.*}"; ext="${src##*.}"
+    TFILE=""
+    for cand in "$stem.test.$ext" "$stem.spec.$ext"; do
+      [ -f "$cand" ] && TFILE="$cand" && break
+    done
+    [ -n "$TFILE" ] || continue
+
+    # a stub module: every value export becomes a throwing function. Nothing
+    # that imports it can do real work, so any test that still passes was
+    # asserting on the import, not on the behaviour.
+    if ! STUB=$(node -e '
+      const fs = require("fs");
+      const src = fs.readFileSync(process.argv[1], "utf8");
+      const names = new Set();
+      for (const re of [/export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g,
+                        /export\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g,
+                        /export\s+class\s+([A-Za-z_$][\w$]*)/g]) {
+        let m; while ((m = re.exec(src))) names.add(m[1]);
+      }
+      for (const m of src.matchAll(/export\s*\{([^}]*)\}/g))
+        for (const part of m[1].split(","))
+          { const n = part.split(/\s+as\s+/).pop().trim(); if (/^[A-Za-z_$][\w$]*$/.test(n)) names.add(n); }
+      if (!names.size) process.exit(3);
+      process.stdout.write([...names].map(n =>
+        "export const " + n + ": any = (..._a: any[]) => { throw new Error(\"mutant\") }"
+      ).join("\n") + "\n");
+    ' "$src" 2>/dev/null); then
+      echo "gate: mutation skipped $src (no value exports to stub)"
+      continue
+    fi
+
+    cp "$src" "$src.tg-mutant-bak" || fail "could not back up $src for mutation"
+    MUT_BACKUPS="$MUT_BACKUPS $src.tg-mutant-bak"
+    printf '%s' "$STUB" > "$src"
+
+    if [ "$RUNNER" = vitest ]; then
+      MOUT=$("$RB" run "$TFILE" 2>&1); MRC=$?
+    else
+      MOUT=$("$RB" "$TFILE" 2>&1); MRC=$?
+    fi
+
+    mv "$src.tg-mutant-bak" "$src"
+    MUT_BACKUPS=""
+    CHECKED=$((CHECKED+1))
+
+    [ "$MRC" -eq 0 ] && SURVIVED="$SURVIVED$TFILE  (implementation $src deleted, suite still green)"$'\n'
+  done <<< "$SRCS"
+
+  if [ -n "$SURVIVED" ]; then
+    printf '%s' "$SURVIVED" | show
+    fail "tests survive mutation of the code they cover"
+  fi
+  echo "gate: mutation smoke ok ($CHECKED file(s) mutated, every suite went red)"
+elif [ "${TG_MUTATE:-}" = "1" ]; then
+  echo "gate: mutation smoke skipped (no test runner installed)"
+fi
+
+# ---------------------------------------------------------------- 7. verdict
 
 echo
 echo "GATE PASS"

@@ -1,0 +1,11 @@
+{
+  "agent": "tester",
+  "prompt": "agents/tester.md",
+  "measured": false,
+  "note": "Not measured yet. The fixture set and the scorer are in place; no agent has been run against them. Scores are null, and null is not zero — do not read this file as a result. First run: benchmarks/run.sh --prompt <fixture>, save the report, benchmarks/run.sh --score <fixture> <report>, then --save-baseline.",
+  "scores": {
+    "off-by-one": null,
+    "mock-only": null,
+    "clean": null
+  }
+}

@@ -4,6 +4,9 @@ model: opus
 input: the raw task string from `/team-irfan <task>`
 output: a printed route decision, then either an answer or a delegation
 budget: 4 tool calls. Triage is reading, not working.
+timeout_ms: 3600000
+max_attempts: 1
+effect_policy: reconcile
 ---
 
 ## Context loading (map-first — before any file read)
@@ -112,6 +115,21 @@ Then run the FULL sequence below. **You are the orchestrator.**
 You run in the main thread. Every other node is a **leaf subagent**: one
 artifact in, one artifact out, spawns nothing.
 
+## Node contracts — what every node declares
+
+Each `agents/<node>.md` frontmatter carries `timeout_ms`, `max_attempts` and
+`effect_policy`. The last one is the only one that changes what you may do:
+
+| policy | means | on retry |
+|---|---|---|
+| `side_effect_free` | writes nothing but its own artifact | re-spawn freely |
+| `idempotent` | writes to its own worktree or overwrites its own file | re-spawn freely |
+| `reconcile` | touches shared state — merges, commits, counters | **check whether the effect already landed, then skip or finish** |
+
+`max_attempts` counts the first attempt. `executor` and `tester` declare 3
+because `retry-guard.sh` allows two retries; change one and the checks fail
+until you change the other.
+
 **Why the topology is a star and not a chain.** You are the only context with a
 channel to Irfan. This graph has three hard human gates — PM's open questions,
 PjM's scope approval, the ship sign-off — and a subagent physically cannot hold
@@ -155,7 +173,12 @@ no summary of what the others are doing.
 
 ## Progress — Irfan sees the run, not just the result
 
-After every node returns, print exactly one line before spawning the next:
+After every node returns, record the resume point, then print exactly one line
+before spawning the next:
+
+```bash
+bash ~/.claude/team-graph/hooks/run-state.sh <run> <node-just-finished> <next-node>
+```
 
 ```
 [3/10] pjm done · 5 tasks · budget 12/60
@@ -165,16 +188,31 @@ Node, one fact, budget. No prose, no recap of what the node said. A run that
 prints nothing between "starting" and a commit appearing is a run Irfan has to
 audit out of git, which costs him more than the run saved him.
 
+`run-state.json` is the resume point. Killed mid-run, the next session reads
+`completed` and `current` and continues from there instead of inferring progress
+from which artifacts happen to exist — which cannot tell "never started" from
+"died before writing". Resuming: read `<run>/run-state.json` first, re-spawn
+`current`, and never re-run anything in `completed`.
+
 ## Sequence
 
 **1. Open the run**
 
 ```bash
+bash ~/.claude/team-graph/hooks/reap.sh   # clear residue from a run that died
 git status --short --branch          # confirm branch and clean tree first
 git switch -c <type>/<slug>          # the goal branch — see below
-touch .tg-active                     # arms the SubagentStop gate hook
+printf '%s\n' "<run>" > .tg-active   # arms the SubagentStop gate + the ledger
 TG_RECORD_BASE=1 TG_RUN=<run> bash ~/.claude/team-graph/hooks/gate.sh
 ```
+
+`reap.sh` runs **first, every time** — at the start, not the end. A run that was
+killed cannot clean up after itself, and a stale `.tg-active` leaves the gate
+hook armed for every unrelated session in this directory. It reports orphan
+branches and never deletes one.
+
+`.tg-active` carries the run directory as its first line. That is how the
+PostToolUse ledger hook knows where to count, and `touch` alone leaves it inert.
 
 **Every goal gets its own branch.** Branch off the default branch, never off the
 previous run's branch. `<type>` is the same vocabulary the commits use:
@@ -261,6 +299,21 @@ git worktree remove ../tg-<slug>-<id>
 git branch -D <type>/<slug>-<id>
 ```
 
+**The merge is a `reconcile` node — check before you repeat it.** Those four
+commands are one logical effect in three non-atomic steps, and a retry after a
+partial merge either duplicates the commit or drops the task silently, with
+nothing in `metrics.json` able to show which. Before merging a task, check
+whether its effect already landed:
+
+```bash
+git log -1 --format=%s          # already this task's subject? the merge landed
+git worktree list               # worktree gone? the merge finished
+```
+
+Landed → skip to the next task. Squashed but not committed (a dirty index on the
+goal branch) → finish the commit, do not squash again. This is what
+`effect_policy: reconcile` in a node's frontmatter obliges: verify, then act.
+
 **`--squash` collapses one worktree's own commits and nothing else.** It is
 there because an executor's in-progress commits are noise. It is not a way to
 fold tasks together: separate work stays a separate commit. Never one
@@ -329,33 +382,50 @@ and it does not ship without Irfan's explicit acceptance.
 **10. Close out**
 
 ```bash
-bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL <total-calls> 60 \
+bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL 0 60 \
   folders=<a,b> context_maps_used=<slug,slug> maps_refreshed=<slug> \
   gate_fails="<stage>:<reason>;<stage>:<reason>" \
-  escalated=<true|false> shipped=true human_overrides=<scope-cut,cap-raised>
+  escalated=<true|false> shipped=true human_overrides=<scope-cut,cap-raised> \
+  route_outcome=<ask Irfan, one word>
 rm .tg-active
 ```
+
+**`route_outcome` you ask, you never decide.** One question, four answers —
+`correct`, `should-have-run`, `should-have-handed-back`, `wrong-tier`. It is the
+only field that can tell the rubric it is wrong, and a route grading itself
+grades itself `correct`. No answer → leave it out; `null` is honest, a guess is
+not.
 
 `context_maps_used` and `maps_refreshed` name **files that exist on disk**.
 `ls .team-irfan/context/` before you pass them. Reporting a refresh of a map
 that was never written makes the metric worse than absent — the evaluation node
 reads it as evidence the memory layer worked.
 
-`<total-calls>` is the ledger's final number, not an estimate made now.
-`retries` and `over_budget` are derived by the script — do not pass them.
+Pass `0` for tool calls. `metrics.sh` reads the real total from `ledger.log` and
+ignores whatever you passed. `retries`, `over_budget`, `gate_caught` and
+`review_rounds` are derived the same way — from `retries.json`, the budget, the
+gate stages, and the `lead` entries in `run-state.json`. Do not pass them, and do
+not correct them afterwards. The only field you supply is the one Irfan answers.
 Then spawn **Retro** (`opus`) → `lessons.md`, and show it to Irfan.
 
-## The budget ledger — you own it
+## The budget ledger — the hook owns it, you read it
 
 **≤60 tool calls for the whole feature**, everyone's included. Per-node budgets
 are ceilings, not allowances; they sum to ~100 for a 2-task feature, which is
 the point — no run may spend every ceiling.
 
-Track it in `<run>/tasks.md`, updated after each node:
+You do not count. The PostToolUse hook counts, into `<run>/ledger.log`. Read it:
 
+```bash
+bash ~/.claude/team-graph/hooks/ledger.sh read <run>    # prints the total
 ```
-budget: 34/60 used — pm 7, pjm 5, exec-1 14, test-1 8
-```
+
+Print that number in the progress line. Never a number you added up yourself —
+an orchestrator counting its own tool calls is the measured party reporting the
+measurement, and every routing conclusion downstream inherits the error.
+
+Hook not wired (`ledger.log` absent after a few nodes)? Say so once, in one
+line, and keep going. Do not substitute a hand count.
 
 At **60, stop.** Write `report.md` with what is done, the rest under Blockers,
 hand it to Irfan. A feature that needs 90 calls is a feature PjM sized wrong,
@@ -371,6 +441,8 @@ worktree and let him raise the cap or cut scope.
 - Letting any node spawn another node.
 - Merging without a PASS, or past an ESCALATE.
 - Leaving `.tg-active`, a worktree, or a `tg/` branch behind.
+- Typing a tool-call total. You read `ledger.sh`, you do not count.
+- Skipping `reap.sh` at the start, or `run-state.sh` after a node.
 
 ## Metrics — HAND-BACK and QUESTION too
 
@@ -379,13 +451,19 @@ A route you did not run still counts. Before you stop:
 ```bash
 bash ~/.claude/team-graph/hooks/metrics.sh \
   ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug> <HAND-BACK|QUESTION> <calls> 4 \
-  folders=<a> shipped=false
+  folders=<a> shipped=false route_outcome=<ask> human_minutes=<ask, HAND-BACK only>
 ```
 
 Without this, HAND-BACK is invisible to `/team-irfan-evaluation` and the one
 number that proves the router is doing its job — the hand-back rate — reads as
 zero. FAST and FULL metrics are written by the node that finishes them, not by
 you.
+
+`human_minutes` is what the hand-back actually cost Irfan, in minutes, from him.
+It is the only direct test of this design's central claim — that handing a small
+task back is cheaper than running it. Ask once, in the same breath as
+`route_outcome`. A hand-back that turns out to cost him 40 minutes is the rubric
+being wrong, and nothing else in the file can say so.
 
 ## Tiebreaks
 

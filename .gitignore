@@ -7,3 +7,7 @@ tests/fixture/src/stub.test.ts
 # the durable record is docs/evaluations/, which carries the metrics without
 # the code.
 runs/*/
+
+# scratch scores between --score and --save-baseline. The baseline itself is
+# committed — that is the whole point of it.
+benchmarks/baselines/.last-*.json

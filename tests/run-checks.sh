@@ -23,9 +23,12 @@ head2() { echo; echo "── $1"; }
 # mutates the repo it lives in makes the next run test something different.
 cleanup() {
   rm -f "$FIXTURE/src/stub.test.ts" "$FIXTURE/src/typeerror.ts"
+  rm -f "$FIXTURE/src/vacuous.ts" "$FIXTURE/src/vacuous.test.ts" "$FIXTURE/src/cart.ts.mutbak"
+  find "$FIXTURE/src" -name '*.tg-mutant-bak' -delete 2>/dev/null
   git -C "$FIXTURE" checkout -- src 2>/dev/null
   [ -f "$FIXTURE/src/cart.test.ts.bak" ] && mv "$FIXTURE/src/cart.test.ts.bak" "$FIXTURE/src/cart.test.ts"
   rm -rf "$FIXTURE/.team-irfan" "$FIXTURE/docs" "$FIXTURE/.gitignore"
+  rm -rf "$TG/runs/99999999-live"
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -224,6 +227,431 @@ head2 "9b. spawn instructions confined to the orchestrator"
 SPAWNERS=$(grep -l 'Agent(' "$TG"/agents/*.md | xargs -n1 basename | grep -v '^router\.md$')
 [ -z "$SPAWNERS" ] && ok "only router.md contains an Agent( call" \
                    || bad "leaf nodes instructing a spawn: $SPAWNERS"
+
+# ── 10. ledger.sh counts deterministically and metrics.sh prefers it ─────────
+head2 "10. ledger.sh counts deterministically and metrics.sh prefers it"
+RUN="$TMP/ledger-run"; mkdir -p "$RUN"
+bash "$TG/hooks/ledger.sh" bump "$RUN" exec-1
+bash "$TG/hooks/ledger.sh" bump "$RUN" exec-1
+bash "$TG/hooks/ledger.sh" bump "$RUN" tester
+N=$(bash "$TG/hooks/ledger.sh" read "$RUN")
+[ "$N" = "3" ] && ok "ledger totals 3 across two nodes" || bad "expected 3, got $N"
+node -e '
+  const l = JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  if (l["exec-1"] !== 2 || l["tester"] !== 1) { console.error(JSON.stringify(l)); process.exit(1); }
+' "$RUN/ledger.json" && ok "per-node attribution kept" || bad "ledger.json lost per-node counts"
+
+# metrics must ignore a passed total that disagrees with the ledger
+bash "$TG/hooks/metrics.sh" "$RUN" FULL 999 60 shipped=true >/dev/null 2>&1
+CALLS=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tool_calls)' "$RUN/metrics.json")
+[ "$CALLS" = "3" ] && ok "metrics.json used the ledger, not the passed 999" \
+                   || bad "metrics.json trusted the agent-passed number ($CALLS)"
+
+# no ledger → the passed number is still the fallback, not zero
+RUNF="$TMP/ledger-fallback"; mkdir -p "$RUNF"
+bash "$TG/hooks/metrics.sh" "$RUNF" FAST 11 15 shipped=true >/dev/null 2>&1
+CF=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).tool_calls)' "$RUNF/metrics.json")
+[ "$CF" = "11" ] && ok "no ledger → passed value still recorded" || bad "fallback broke, got $CF"
+
+# concurrent bumps must not lose a write
+RUN2="$TMP/ledger-race"; mkdir -p "$RUN2"
+for i in $(seq 1 20); do bash "$TG/hooks/ledger.sh" bump "$RUN2" exec-1 & done; wait
+N2=$(bash "$TG/hooks/ledger.sh" read "$RUN2")
+[ "$N2" = "20" ] && ok "20 concurrent bumps all recorded" || bad "lost writes: $N2/20"
+
+# hook mode is inert without the marker, and counts with it
+HRUN="$TMP/ledger-hook"; mkdir -p "$HRUN" "$TMP/hookcwd"
+( cd "$TMP/hookcwd" && echo '{}' | bash "$TG/hooks/ledger.sh" hook ) ; HRC=$?
+[ "$HRC" -eq 0 ] && [ ! -f "$HRUN/ledger.log" ] \
+  && ok "hook is inert with no .tg-active" || bad "hook fired outside a run (rc=$HRC)"
+( cd "$TMP/hookcwd" && printf '%s\n' "$HRUN" > .tg-active \
+  && echo '{"tool_name":"Bash"}' | bash "$TG/hooks/ledger.sh" hook )
+[ "$(bash "$TG/hooks/ledger.sh" read "$HRUN")" = "1" ] \
+  && ok "hook counts when .tg-active names the run" || bad "hook did not count"
+
+# ── 11. reap.sh clears crash residue and never eats unmerged work ────────────
+head2 "11. reap.sh clears crash residue and never eats unmerged work"
+REPO="$TMP/reap"; mkdir -p "$REPO"
+git -C "$REPO" init -q .
+git -C "$REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+touch "$REPO/.tg-active"
+git -C "$REPO" worktree add -q "$TMP/tg-orphan-1" -b feat/orphan-1 >/dev/null 2>&1
+( cd "$REPO" && TG_REAP_AGE=0 bash "$TG/hooks/reap.sh" ) >/dev/null 2>&1
+[ ! -f "$REPO/.tg-active" ] && ok "stale .tg-active removed" || bad ".tg-active survived"
+git -C "$REPO" worktree list | grep -q 'tg-orphan-1' && bad "orphan worktree survived" \
+                                                     || ok "orphan worktree removed"
+git -C "$REPO" branch --list 'feat/orphan-1' | grep -q . \
+  && ok "branch preserved, not deleted" || bad "reap deleted a branch"
+
+# --dry-run must change nothing
+touch "$REPO/.tg-active"
+( cd "$REPO" && TG_REAP_AGE=0 bash "$TG/hooks/reap.sh" --dry-run ) >/dev/null 2>&1
+[ -f "$REPO/.tg-active" ] && ok "--dry-run changed nothing" || bad "--dry-run deleted state"
+
+# an ACTIVE run must survive a reap
+mkdir -p "$TG/runs/99999999-live"
+( cd "$REPO" && bash "$TG/hooks/reap.sh" ) >/dev/null 2>&1
+[ -f "$REPO/.tg-active" ] && ok "live run untouched" || bad "reap killed a live run"
+rm -rf "$TG/runs/99999999-live" "$REPO/.tg-active"
+cd "$FIXTURE" || exit 2
+
+# ── 12. a killed run is resumable from disk alone ────────────────────────────
+head2 "12. a killed run is resumable from disk alone"
+RUN="$TMP/resume"; mkdir -p "$RUN"
+printf '# brief\n' > "$RUN/brief.md"
+printf '# tasks\n- T1\n- T2\n' > "$RUN/tasks.md"
+bash "$TG/hooks/run-state.sh" "$RUN" pm pjm >/dev/null
+bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+bash "$TG/hooks/retry-guard.sh" "$RUN" T1 >/dev/null
+# simulate the kill: nothing else exists
+
+if node -e '
+  const fs=require("fs"), d=process.argv[1];
+  const st=JSON.parse(fs.readFileSync(d+"/run-state.json","utf8"));
+  const fail=m=>{console.error(m);process.exit(1)};
+  if (!st.completed.includes("pjm")) fail("cannot tell pjm finished");
+  if (st.current !== "exec-1") fail("cannot tell where to resume");
+  for (const f of st.completed.map(n=>({pm:"brief.md",pjm:"tasks.md"}[n])).filter(Boolean))
+    if (!fs.existsSync(d+"/"+f)) fail("completed node has no artifact: "+f);
+  const r=JSON.parse(fs.readFileSync(d+"/retries.json","utf8"));
+  if (r.T1 !== 1) fail("retry count did not survive the kill");
+' "$RUN" 2>"$TMP/rerr"; then
+  ok "resume point, artifacts and retry count all survive"
+else
+  bad "run is not resumable from disk: $(cat "$TMP/rerr")"
+fi
+# re-recording a finished node must not duplicate it
+bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+node -e '
+  const st=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  process.exit(st.completed.filter(n=>n==="pjm").length === 1 ? 0 : 1);
+' "$RUN/run-state.json" && ok "completed list is idempotent" || bad "resume point duplicates nodes"
+
+grep -q 'run-state.sh' "$TG/agents/router.md" \
+  && ok "orchestrator writes run-state.json" || bad "nothing writes the resume point"
+grep -q 'reap.sh' "$TG/agents/router.md" \
+  && ok "orchestrator reaps before it starts" || bad "reap.sh never runs"
+grep -q 'ledger.sh read' "$TG/agents/router.md" \
+  && ok "orchestrator reads the ledger instead of counting" || bad "budget is still hand-counted"
+
+# ── 13. evaluation refuses metric-derived tuning below n=5 ───────────────────
+head2 "13. evaluation refuses metric-derived tuning below n=5"
+grep -qE 'n *[<>=]+ *5|five runs|INSUFFICIENT DATA' "$TG/agents/evaluation.md" \
+  && ok "threshold is stated" || bad "no n=5 threshold in evaluation.md"
+grep -qi 'direct run review\|operator review' "$TG/agents/evaluation.md" \
+  && ok "direct-review path stays open at any n" \
+  || bad "no carve-out for direct review — evaluation is now useless at low n"
+grep -q '^- Proposing a rubric change from aggregated' "$TG/agents/evaluation.md" \
+  && ok "the floor is a forbidden action, not a disclaimer" \
+  || bad "n=5 floor is advisory only"
+COUNT=$(ls "$TG"/runs/*/metrics.json 2>/dev/null | wc -l | tr -d ' ')
+echo "  INFO  current run count: $COUNT (rubric tuning unlocks at 5)"
+
+# ── 14. every agent declares a node contract ─────────────────────────────────
+head2 "14. every agent declares a node contract"
+for f in "$TG"/agents/*.md; do
+  n=$(basename "$f")
+  MISS=""
+  for k in timeout_ms max_attempts effect_policy; do
+    grep -qE "^${k}:" "$f" || MISS="$MISS $k"
+  done
+  [ -z "$MISS" ] && ok "$n declares full contract" || bad "$n missing:$MISS"
+  POL=$(grep -E '^effect_policy:' "$f" | awk '{print $2}')
+  case "$POL" in
+    side_effect_free|idempotent|reconcile) ok "$n policy=$POL" ;;
+    *) bad "$n has invalid effect_policy '$POL'" ;;
+  esac
+  TMO=$(grep -E '^timeout_ms:' "$f" | awk '{print $2}')
+  { [ "$TMO" -ge 100 ] && [ "$TMO" -le 86400000 ]; } 2>/dev/null \
+    && ok "$n timeout_ms=$TMO in range" || bad "$n timeout_ms out of 100ms–24h: '$TMO'"
+done
+grep -q 'reconcile' "$TG/agents/router.md" \
+  && ok "orchestrator documents the reconcile check" \
+  || bad "no reconcile guard documented for merge/commit"
+grep -q 'git log -1 --format=%s' "$TG/agents/router.md" \
+  && ok "reconcile check is a command, not an intention" \
+  || bad "reconcile guard names no way to detect a landed merge"
+
+# retry policy lives in two places; they must not drift
+LIMIT=$(grep -E '^LIMIT=' "$TG/hooks/retry-guard.sh" | head -1 | sed 's/^LIMIT=\([0-9]*\).*/\1/')
+for a in executor tester; do
+  MA=$(grep -E '^max_attempts:' "$TG/agents/$a.md" | awk '{print $2}')
+  [ "$MA" = "$((LIMIT+1))" ] \
+    && ok "$a max_attempts=$MA matches retry-guard LIMIT=$LIMIT" \
+    || bad "$a max_attempts=$MA but retry-guard allows $((LIMIT+1)) attempts"
+done
+
+# ── 15. graph.json is valid, acyclic, and matches the agent files ────────────
+head2 "15. graph.json is valid, acyclic, and matches the agent files"
+if node -e '
+  const fs = require("fs"), path = require("path");
+  const TG = process.argv[1];
+  const g = JSON.parse(fs.readFileSync(path.join(TG, "graph.json"), "utf8"));
+  const ids = new Set(g.nodes.map(n => n.id));
+  const fail = m => { console.error(m); process.exit(1); };
+
+  // every edge endpoint exists
+  for (const [a,b] of g.edges) {
+    if (!ids.has(a)) fail("edge from unknown node: " + a);
+    if (!ids.has(b)) fail("edge to unknown node: " + b);
+  }
+  // acyclic
+  const adj = {}; for (const [a,b] of g.edges) (adj[a] ||= []).push(b);
+  const seen = {}, walk = n => {
+    if (seen[n] === 1) fail("cycle at " + n);
+    if (seen[n] === 2) return; seen[n] = 1;
+    for (const m of adj[n] || []) walk(m); seen[n] = 2;
+  };
+  for (const n of ids) walk(n);
+
+  // INVARIANT: every node except the orchestrator is a leaf. leaf === true means
+  // the orchestrator owns every edge, which is what makes F4 (a leaf told to
+  // spawn a node) a structural impossibility rather than a prompt slip.
+  for (const n of g.nodes)
+    if (n.kind === "agent" && n.leaf !== true) fail("non-leaf agent node: " + n.id);
+
+  // INVARIANT: the three human gates are structural, not prose
+  const gates = g.nodes.filter(n => n.kind === "human-approval");
+  if (gates.length < 3) fail("expected 3 human gates, found " + gates.length);
+  for (const gate of gates)
+    if (!gate.prompt) fail("human gate with no prompt: " + gate.id);
+
+  // every agent node has a real prompt file
+  for (const n of g.nodes)
+    if (n.kind === "agent" && !fs.existsSync(path.join(TG, "agents", n.id + ".md")))
+      fail("no prompt file for node " + n.id);
+
+  // and every prompt file is accounted for — a new agent cannot hide from the graph
+  const declared = new Set([...g.nodes.map(n=>n.id), ...(g.standalone||[]).map(n=>n.id)]);
+  for (const f of fs.readdirSync(path.join(TG, "agents")).filter(f => f.endsWith(".md"))) {
+    const id = f.replace(/\.md$/, "");
+    if (!declared.has(id)) fail("agents/" + f + " appears in no graph node and no standalone entry");
+  }
+
+  // the graph and the frontmatter must agree on effect_policy
+  for (const n of g.nodes) {
+    if (n.kind !== "agent") continue;
+    const fm = fs.readFileSync(path.join(TG, "agents", n.id + ".md"), "utf8");
+    const m = fm.match(/^effect_policy:\s*(\S+)/m);
+    if (!m) fail(n.id + ".md declares no effect_policy");
+    if (m[1] !== n.effect_policy)
+      fail(n.id + ": graph says " + n.effect_policy + ", frontmatter says " + m[1]);
+  }
+' "$TG" 2>"$TMP/gerr"; then
+  ok "graph.json valid: acyclic, all-leaf, 3 gates, files exist, policies agree"
+else
+  bad "graph.json failed validation: $(cat "$TMP/gerr")"
+fi
+
+# ── 16. metrics carries quality fields, derived not asserted ─────────────────
+head2 "16. metrics carries quality fields, derived not asserted"
+RUN="$TMP/quality"; mkdir -p "$RUN"
+bash "$TG/hooks/metrics.sh" "$RUN" FULL 40 60 \
+  gate_fails="typecheck:missing return type;env:no coverage provider" \
+  review_rounds=2 shipped=true >/dev/null 2>&1
+if node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const need = ["gate_caught","review_rounds","post_ship_fix"];
+  const missing = need.filter(k => !(k in m));
+  if (missing.length) { console.error("missing: " + missing); process.exit(1); }
+  if (m.gate_caught !== 1) { console.error("gate_caught should be 1 (env noise excluded), got " + m.gate_caught); process.exit(1); }
+  if (m.review_rounds !== 2) { console.error("review_rounds not recorded"); process.exit(1); }
+' "$RUN/metrics.json" 2>"$TMP/qerr"; then
+  ok "quality fields present and derived correctly"
+else
+  bad "quality fields wrong: $(cat "$TMP/qerr")"
+fi
+# every real gate stage must count as a catch, or the signal is dead on arrival
+RUN="$TMP/quality2"; mkdir -p "$RUN"
+bash "$TG/hooks/metrics.sh" "$RUN" FULL 40 60 \
+  gate_fails="unit tests:boundary;stub tests detected:expect(true);coverage dropped on changed files:cart.ts;setup:npm install failed" \
+  >/dev/null 2>&1
+GC=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).gate_caught)' "$RUN/metrics.json")
+[ "$GC" = "3" ] && ok "all three code stages count, setup noise does not" \
+                || bad "gate_caught=$GC, expected 3"
+grep -q 'gate_caught' "$TG/agents/evaluation.md" \
+  && ok "evaluation aggregates quality" || bad "evaluation ignores quality fields"
+
+# review_rounds comes from the resume point when there is one, not from the agent
+RUN="$TMP/rounds"; mkdir -p "$RUN"
+bash "$TG/hooks/run-state.sh" "$RUN" lead gate-ship   >/dev/null
+bash "$TG/hooks/run-state.sh" "$RUN" lead-2 gate-ship >/dev/null
+bash "$TG/hooks/metrics.sh" "$RUN" FULL 40 60 review_rounds=1 >/dev/null 2>&1
+RR=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).review_rounds)' "$RUN/metrics.json")
+[ "$RR" = "2" ] && ok "review_rounds counted from run-state, not the passed 1" \
+                || bad "review_rounds=$RR, expected 2 from the resume point"
+
+# ── 17. route outcome recorded for every route, runs and non-runs alike ──────
+head2 "17. route outcome recorded for every route, runs and non-runs alike"
+for route in HAND-BACK QUESTION FAST FULL; do
+  RUN="$TMP/route-$route"; mkdir -p "$RUN"
+  bash "$TG/hooks/metrics.sh" "$RUN" "$route" 3 4 route_outcome=correct human_minutes=4 >/dev/null 2>&1
+  node -e '
+    const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+    if (!("route_outcome" in m)) { console.error("route_outcome missing"); process.exit(1); }
+    if (m.route_outcome !== "correct") { console.error("valid outcome not stored"); process.exit(1); }
+    if (m.route==="HAND-BACK" && !("human_minutes" in m)) { console.error("human_minutes missing on HAND-BACK"); process.exit(1); }
+  ' "$RUN/metrics.json" && ok "$route records outcome" || bad "$route missing outcome fields"
+done
+# an invalid value must be rejected, not silently stored
+RUN="$TMP/route-bad"; mkdir -p "$RUN"
+bash "$TG/hooks/metrics.sh" "$RUN" FAST 3 15 route_outcome=lgtm >/dev/null 2>&1
+node -e '
+  const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  process.exit(m.route_outcome === "lgtm" ? 1 : 0);
+' "$RUN/metrics.json" && ok "invalid outcome rejected" || bad "metrics stored a junk outcome"
+# an unrecorded outcome is null, never a default of "correct"
+RUN="$TMP/route-none"; mkdir -p "$RUN"
+bash "$TG/hooks/metrics.sh" "$RUN" FULL 3 60 >/dev/null 2>&1
+node -e '
+  const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  process.exit(m.route_outcome === null ? 0 : 1);
+' "$RUN/metrics.json" && ok "no answer stays null, not correct" || bad "unrecorded outcome defaulted"
+grep -q 'route_outcome' "$TG/agents/router.md" \
+  && ok "router asks for the outcome" || bad "nothing ever records route_outcome"
+
+# ── 18. run artifacts survive concurrent writers ─────────────────────────────
+head2 "18. run artifacts survive concurrent writers"
+RUN="$TMP/concurrent"; mkdir -p "$RUN"
+for i in $(seq 1 10); do
+  ( bash "$TG/hooks/retry-guard.sh" "$RUN" "T$i" >/dev/null 2>&1 ) &
+done; wait
+node -e '
+  const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const n=Object.keys(s).length;
+  if (n!==10) { console.error("expected 10 task keys, got "+n); process.exit(1); }
+' "$RUN/retries.json" && ok "10 concurrent retry-guard writers, no lost keys" \
+                      || bad "retries.json lost a concurrent write"
+[ -z "$(find "$RUN" -name '*.lock' -o -name '*.tmp' 2>/dev/null)" ] \
+  && ok "no lock or tmp residue left behind" || bad "lock/tmp files survived the run"
+
+grep -q 'coverage-base' "$TG/hooks/gate.sh" && \
+grep -qE 'coverage-base[^"]*\$' "$TG/hooks/gate.sh" \
+  && ok "coverage baseline path is parameterised per worktree" \
+  || bad "coverage baseline is a single shared file across concurrent executors"
+grep -q 'atomic_cp "$SUMMARY"' "$TG/hooks/gate.sh" \
+  && ok "baseline is replaced atomically, never half-written" \
+  || bad "baseline still written with a plain cp — readers can tear"
+
+# a worktree with no baseline of its own must still read the run's
+RUN="$TMP/covfall"; mkdir -p "$RUN"
+printf '{"total":{"lines":{"pct":100}}}\n' > "$RUN/coverage-base.txt"
+mkdir -p "$TMP/tg-fallback-1" && cd "$TMP/tg-fallback-1"
+OUT=$(TG_RUN="$RUN" bash "$GATE" 2>&1)
+grep -q 'no package.json' <<< "$OUT" && ok "gate still refuses a non-project dir" \
+                                     || bad "gate ran outside a project"
+cd "$FIXTURE" || exit 2
+OUT=$(TG_RUN="$RUN" TG_SCAN=all bash "$GATE" 2>&1); RC=$?
+grep -q 'coverage' <<< "$OUT" && ok "shared baseline is found from the main tree" \
+                              || bad "baseline never consulted: $(tail -3 <<< "$OUT")"
+
+# ── 19. mutation smoke catches a test that asserts nothing real ──────────────
+head2 "19. mutation smoke catches a test that asserts nothing real"
+cd "$FIXTURE" || exit 2
+cp src/cart.ts src/cart.ts.mutbak
+cat > src/vacuous.ts <<'EOF'
+export function addTax(n: number): number { return n * 1.11 }
+EOF
+cat > src/vacuous.test.ts <<'EOF'
+import { it, expect } from 'vitest'
+import { addTax } from './vacuous.js'
+it('does something', () => { expect(typeof addTax).toBe('function') })
+EOF
+OUT=$(TG_MUTATE=1 TG_SCAN=all bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && ok "exit 1 on a vacuous test" || bad "expected exit 1, got $RC"
+grep -q 'survive mutation' <<< "$OUT" && ok "named the mutation failure" || bad "wrong reason"
+grep -q 'vacuous' <<< "$OUT" && ok "named the offending file" || bad "no file named"
+
+rm -f src/vacuous.ts src/vacuous.test.ts
+# and it must NOT fire on the real tests
+OUT=$(TG_MUTATE=1 TG_SCAN=all bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "no false positive on the honest fixture" || bad "mutation false-positived"
+grep -q 'mutation smoke ok' <<< "$OUT" && ok "mutation actually ran" || bad "mutation silently skipped"
+# the fixture must be byte-identical afterwards
+diff -q src/cart.ts src/cart.ts.mutbak >/dev/null \
+  && ok "mutation restored every file" || bad "mutation corrupted the fixture"
+[ -z "$(find "$FIXTURE/src" -name '*.tg-mutant-bak' 2>/dev/null)" ] \
+  && ok "no mutant backups left behind" || bad "mutation left .tg-mutant-bak residue"
+rm -f src/cart.ts.mutbak
+# off by default — nobody pays for it who did not ask
+OUT=$(TG_SCAN=all bash "$GATE" 2>&1)
+grep -q 'mutation' <<< "$OUT" && bad "mutation ran without TG_MUTATE=1" \
+                              || ok "opt-in only, silent by default"
+grep -q 'TG_MUTATE' "$TG/agents/tester.md" \
+  && ok "tester is the node that runs it" || bad "nothing ever sets TG_MUTATE"
+
+# ── 20. tester benchmark harness is wired and regression-guarded ─────────────
+head2 "20. tester benchmark harness is wired and regression-guarded"
+[ -f "$TG/benchmarks/run.sh" ] && ok "runner exists" || bad "no benchmark runner"
+COUNT=$(ls "$TG"/benchmarks/tester/ground-truth/*.json 2>/dev/null | wc -l | tr -d ' ')
+[ "$COUNT" -ge 3 ] && ok "$COUNT ground-truth cases" || bad "need >=3 cases, have $COUNT"
+
+# every fixture has ground truth and vice versa — no orphans
+if node -e '
+  const fs=require("fs"), b=process.argv[1]+"/benchmarks/tester";
+  const fx=fs.readdirSync(b+"/fixtures").map(f=>f.replace(/\..*$/,"")).sort();
+  const gt=fs.readdirSync(b+"/ground-truth").map(f=>f.replace(/\.json$/,"")).sort();
+  if (JSON.stringify(fx)!==JSON.stringify(gt)) {
+    console.error("fixture/ground-truth mismatch\n  fixtures: "+fx+"\n  truth: "+gt);
+    process.exit(1);
+  }
+  // the clean case must expect zero findings, or the benchmark rewards noise
+  const clean=gt.find(n=>/clean|correct/.test(n));
+  if (!clean) { console.error("no clean fixture — false positives go unmeasured"); process.exit(1); }
+  const exp=JSON.parse(fs.readFileSync(b+"/ground-truth/"+clean+".json","utf8"));
+  if ((exp.required_findings||[]).length!==0) { console.error("clean fixture expects findings"); process.exit(1); }
+' "$TG" 2>"$TMP/berr"; then
+  ok "fixtures paired, clean case guards false positives"
+else
+  bad "benchmark set is malformed: $(cat "$TMP/berr")"
+fi
+
+bash "$TG/benchmarks/run.sh" --dry-run >/dev/null 2>&1 \
+  && ok "dry-run pipeline validates without API calls" || bad "dry-run failed"
+[ -f "$TG/benchmarks/baselines/tester.json" ] \
+  && ok "baseline committed" || bad "no baseline to regress against"
+
+# the scorer must actually discriminate, or the harness is decoration
+SC="$TMP/score"; mkdir -p "$SC"
+printf 'verdict: FAIL\n\nBUG-1: at 10 units the discount is skipped\n' > "$SC/good.md"
+printf 'verdict: PASS\n\nlooks fine\n' > "$SC/blind.md"
+printf 'verdict: FAIL\n\nBUG-1: slugify is broken\n' > "$SC/noisy.md"
+bash "$TG/benchmarks/run.sh" --score off-by-one "$SC/good.md"  >/dev/null 2>&1 \
+  && ok "scorer passes a report that found the seeded bug" || bad "scorer failed a correct report"
+bash "$TG/benchmarks/run.sh" --score off-by-one "$SC/blind.md" >/dev/null 2>&1 \
+  && bad "scorer passed a report that missed the bug" || ok "scorer fails a report that missed it"
+bash "$TG/benchmarks/run.sh" --score clean "$SC/noisy.md" >/dev/null 2>&1 \
+  && bad "scorer passed a false positive on the clean fixture" || ok "scorer fails invented findings"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+
+# an unmeasured baseline must say so — null is not zero
+node -e '
+  const b=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+  const scored=Object.values(b.scores||{}).filter(Boolean).length;
+  if (b.measured === false && scored === 0) process.exit(0);
+  if (b.measured === true && scored > 0) process.exit(0);
+  console.error("baseline claims measured=" + b.measured + " with " + scored + " scores");
+  process.exit(1);
+' "$TG/benchmarks/baselines/tester.json" \
+  && ok "baseline does not pass off unmeasured nulls as results" \
+  || bad "baseline's measured flag disagrees with its scores"
+
+# ── 21. prompt files may not grow without something being deleted ────────────
+# The ratchet, not the split. router.md IS the largest file and every evaluation
+# appends to it, but splitting it costs a second file read on the FULL path — a
+# tool call, in a system whose budget is denominated in tool calls — to save
+# context, which nothing here measures. A ceiling makes the growth a failing
+# check instead of invisible drift, and costs nothing. Raise it deliberately, in
+# a commit that says why; do not raise it to make a red check green.
+head2 "21. prompt files may not grow without something being deleted"
+CAP_ORCH=560
+CAP_LEAF=230
+for f in "$TG"/agents/*.md; do
+  a=$(basename "$f" .md); L=$(wc -l < "$f" | tr -d ' ')
+  if [ "$a" = router ]; then CAP=$CAP_ORCH; else CAP=$CAP_LEAF; fi
+  [ "$L" -le "$CAP" ] && ok "$a.md $L/$CAP lines" \
+    || bad "$a.md is $L lines, over its $CAP cap — delete before you add"
+done
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

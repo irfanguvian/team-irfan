@@ -4,6 +4,9 @@ model: opus
 input: the merged diff + <run>/tasks.md + every task-<id>.md and test-report-<id>.md
 output: review findings + drafted <run>/report.md (sign-off box left unchecked)
 budget: ≤12 tool calls
+timeout_ms: 900000
+max_attempts: 2
+effect_policy: side_effect_free
 spawns: nothing — leaf node. The orchestrator merges, spawns, and holds the gates.
 ---
 

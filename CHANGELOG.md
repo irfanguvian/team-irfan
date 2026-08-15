@@ -5,6 +5,93 @@ project's.
 
 ---
 
+## v2.2.0 — 2026-08-15
+
+**The numbers behind v2.1's headline were produced by an LLM counting its own
+tool calls.** This release moves every measurement that governs a decision out of
+the prompts and into scripts, then tests the claims the README was already
+making. Checks go 74 → 174, zero failed.
+
+### Fixed
+
+- **The budget ledger was self-reported.** `metrics.sh` already refused agent
+  self-assessment for `retries` and `over_budget`, but `tool_calls` came from a
+  ledger the orchestrator kept by hand — the measured party reporting the
+  measurement. New `hooks/ledger.sh` counts from a PostToolUse hook into an
+  append-only `<run>/ledger.log`; `metrics.sh` reads it and ignores whatever was
+  passed. Every "150/60" conclusion downstream now rests on a script.
+  **Needs one additive `settings.json` entry — see the README install section.**
+- **Concurrent testers lost retry counts.** `retry-guard.sh` did a
+  read-modify-write behind an atomic rename, which fixes torn reads and does
+  nothing for lost writes. Measured: 10 concurrent writers, 8 keys survived. Now
+  serialised through `with_lock` in the new `lib/atomic.sh`; 10 of 10 survive.
+- **A killed run left the gate armed for every unrelated session.** A stale
+  `.tg-active` inverts the isolation guarantee into a global side effect, and
+  "never leave one behind" was a prompt rule that cannot execute in the one case
+  that matters. New `hooks/reap.sh` runs at the *start* of every FULL run.
+  It removes orphan `tg-*` worktrees and stale markers, and **reports branches
+  rather than deleting them** — see Rejected.
+- **The coverage baseline was copied with a plain `cp`.** A resumed run
+  re-recording it while executors read against it yields a torn read, which
+  fails as `coverage dropped` — a wrong verdict, not a crash. Now an atomic
+  replace, and a gate run inside a `tg-*` worktree records to its own file.
+
+### Added
+
+- **`graph.json`** — the FULL pipeline as data instead of an ASCII diagram.
+  Checked for: every edge endpoint real, acyclic, every agent node a leaf, three
+  `human-approval` nodes, a prompt file per node, no prompt file missing from the
+  graph, and `effect_policy` agreeing with each file's frontmatter. F4 in
+  evaluation 001 was a topology violation that survived because no artifact
+  described the topology; that class is now a failing check.
+- **Node contracts** — `timeout_ms`, `max_attempts`, `effect_policy` in every
+  agent's frontmatter. The merge sequence is `reconcile` and `router.md` now
+  carries the check that goes with it: three non-atomic steps behind a retry
+  policy was the highest-severity latent bug in the repo.
+- **`hooks/run-state.sh`** — `{completed, current}` after every node. "Kill any
+  node mid-run and the next one picks up from disk" was a load-bearing claim with
+  no test; resume is now a read rather than an inference from which artifacts
+  happen to exist.
+- **Quality metrics** — `gate_caught` (gate failures naming real code defects,
+  derived from the stage, not asserted), `review_rounds`, `post_ship_fix`. Every
+  previous field measured cost. An optimiser fed only cost tunes toward
+  cheapness forever while the table keeps improving.
+- **`route_outcome` + `human_minutes`** — the rubric's only falsifier. A
+  HAND-BACK that should have run is invisible in every other number, because
+  nothing ran and nothing overspent. Irfan answers; an invalid value is recorded
+  as `null`, never stored.
+- **Mutation smoke** in `gate.sh` (`TG_MUTATE=1`, Tester only). Stub detection is
+  syntactic and catches a test that *looks* empty; this catches the one that
+  looks fine and survives the deletion of the code it covers.
+- **`benchmarks/`** — fixtures + ground truth + committed baseline for the
+  Tester prompt, including a clean case that must produce zero findings. The
+  baseline says `measured: false` and its nulls are not zeros: the set and the
+  scorer exist, no agent has been run against them yet.
+- **Evaluation authority split** — findings from direct run review are allowed at
+  any n; findings derived from aggregated metrics are blocked below 5 runs with
+  `INSUFFICIENT DATA — n=<k>, need 5`. Evaluation 001 applied eight sound diffs at
+  n=1, all from run review and none from the numbers. The guard is structural
+  now, not a disclaimer under a table that got printed anyway.
+- **A line-count ceiling on every prompt file** — 560 for the orchestrator, 230
+  for leaves. Growth becomes a failing check instead of invisible drift.
+
+### Rejected
+
+- **Splitting `router.md` into `triage.md` + `orchestrator.md`.** The finding is
+  real — it is the largest file and every evaluation appends to it — but the
+  remedy is priced in the wrong currency. Reading a file costs one tool call
+  regardless of length, and tool calls are what this system budgets; the split
+  adds a read to the FULL path to save context, which nothing here measures. It
+  also divides the one context that holds the star topology together, and the
+  failure the repo has actually experienced (a leaf told to spawn) is a coherence
+  failure. Ceiling instead of split.
+- **Deleting merged orphan branches in `reap.sh`.** A worktree branch is created
+  at HEAD, so it reads as *already merged* the moment it exists — "delete merged
+  orphans" would eat the branch of a run that crashed before its first commit.
+  Reported, never deleted.
+
+---
+
 ## v2.1.0 — 2026-08-15
 
 **First release driven by a real run.** v2.0 was built and unit-checked but had

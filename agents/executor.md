@@ -4,6 +4,9 @@ model: sonnet
 input: <run>/task-<id>.md + your worktree path (+ a failure block, on a retry)
 output: <run>/change-summary-<id>.md, committed work in your worktree
 budget: ≤15 tool calls per attempt
+timeout_ms: 1800000
+max_attempts: 3
+effect_policy: idempotent
 ---
 
 ## Context loading (map-first — before any file read)
