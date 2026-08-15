@@ -147,6 +147,64 @@ Permanent. Every node inherits it.
 
 ---
 
+## Model matrix
+
+Default. A project overrides it in `.team-irfan/config.md`; delete a row there
+to fall back here.
+
+| node | model | why |
+|---|---|---|
+| router | opus | triage is the highest-leverage decision in the graph |
+| pm | opus | inventing a business rule is the most expensive failure |
+| lead | opus | merge, review, breaking-change judgement |
+| init | opus | convention extraction — the whole value is judgement |
+| evaluation | opus | reads the graph's own record and proposes changes |
+| pjm | sonnet | decomposition against a written brief |
+| executor | sonnet | implements one spec'd task |
+| tester | sonnet | runs written commands, records evidence |
+| solo-executor | sonnet | small, bounded, gated |
+| retro | sonnet | summarises artifacts |
+
+The matrix only takes effect because nodes are spawned as **real subagents**
+with an explicit `model`. Frontmatter alone is inert — a prompt file read
+inline runs on whatever model is already in the session.
+
+## Context loading (v2)
+
+Agents read **context maps, not folders**.
+
+```
+.team-irfan/config.md                    stack, exact gate commands, conventions
+.team-irfan/context/<folder-slug>.md     one per folder, 80-line cap
+```
+
+- `/team-irfan init` writes `config.md` only. **Whole-repo indexing is banned.**
+- `/team-irfan init <folder>` writes one map. Maps are otherwise generated
+  lazily, on first task touching that folder.
+- Freshness is one command: `git diff --name-only <last_commit> -- <folder>`.
+  Empty → trust the map, do not re-read the folder. Non-empty → re-read **only
+  the changed files**, ≤10 tool calls, update `last_commit`.
+- Reading outside the in-scope folders is a forbidden action. Grep
+  `docs/REGISTRY.md` or read the neighbour's map instead.
+- PjM writes `folders in scope` into `task-spec.md` so executors inherit scope
+  mechanically rather than inferring it.
+- `.team-irfan/` is **local only and gitignored**. Never committed.
+
+Canonical rule: `skills/context-loading/SKILL.md`.
+
+## Evaluation (v2)
+
+Every run ends by writing `runs/<id>/metrics.json` via `hooks/metrics.sh` —
+command-sourced facts only. `retries` comes from `retries.json`, `over_budget`
+is derived from the ledger. No node grades itself.
+
+`/team-irfan-evaluation` is **on-demand — Irfan runs it, never automatic,
+never self-applying.** It aggregates every run, finds routing errors (FAST that
+blew budget, FULL that was trivial, a hand-back rate near zero), and proposes
+prompt edits **as diffs, one at a time, applied only on "y"**. It writes
+`docs/eval/<date>-team-irfan.md` and never touches `CLAUDE.md`, skills, hooks,
+or `settings.json`.
+
 ## Modes
 
 | Mode | Where | What it does |

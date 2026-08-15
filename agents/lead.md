@@ -1,5 +1,6 @@
 ---
 node: lead
+model: opus
 input: <run>/tasks.md (approved by Irfan) + every <run>/task-<id>.md
 output: merged branch, code review, <run>/report.md
 budget: ≤20 tool calls of your own (executors and tester carry their own)
@@ -74,10 +75,45 @@ One per task, never shared. Two executors in one tree is the failure this
 design exists to prevent. Tasks with `Depends on:` wait for the dependency to
 merge before their worktree is created.
 
-Spawn exactly as many executors as `tasks.md` has tasks. Not one more. Each
-gets: its `task-<id>.md` path, its worktree path, the run dir, and
-`agents/executor.md` as its role. Nothing else — no repo tour, no sibling task
-context. Stateless means it reads its artifact and works.
+Spawn exactly as many executors as `tasks.md` has tasks. Not one more.
+
+### How to spawn — real subagents, not inline work
+
+Each node is a **separate subagent**. The graph is agents talking to agents
+through artifacts; running an executor inline in your own context defeats the
+isolation the worktrees exist to provide.
+
+```
+Agent(
+  subagent_type: "general-purpose",
+  model:         "sonnet",                     # from the matrix, or config.md
+  name:          "exec-<id>",
+  description:   "execute task <id>",
+  prompt:        "Read and follow ~/.claude/team-graph/agents/executor.md as
+                  your system prompt for this task.
+
+                  task spec:  <run>/task-<id>.md
+                  worktree:   ../tg-<slug>-<id>   (cd here first)
+                  run dir:    <run>
+                  base:       <base-branch>
+
+                  Output <run>/change-summary-<id>.md and nothing else."
+)
+```
+
+Independent executors go in **one message, multiple tool calls**, so they run
+concurrently. Tasks with `Depends on:` wait.
+
+Hand each subagent **only** its artifact paths. No repo tour, no sibling task
+context, no summary of what the others are doing. Stateless means it reads its
+artifact and works.
+
+**If nested spawning is unavailable to you** — you are yourself a subagent and
+the Agent tool is not in your toolset — do not fall back to doing the work
+inline. Write `<run>/spawn-plan.md` listing each executor's model, prompt, and
+paths, and return it. The orchestrator fans out from that. A Lead that
+implements because it could not delegate has become an executor with a bigger
+budget.
 
 ## 3. Executor → gate → tester loop
 
@@ -180,3 +216,34 @@ worktrees removed: <n>
 ```
 
 then `report.md`, then the sign-off request.
+
+---
+
+## Forbidden actions (identical in every team-irfan node)
+
+Hard stops, not judgement calls. A task that appears to require one of these is
+a task that stops and asks Irfan.
+
+- **No `git push`** in any form. No `--force`, no `--force-with-lease`, no
+  `push --tags`. No tag creation, no release creation, no `gh release`.
+- **No deploys.** No `vercel`, `fly deploy`, `kubectl apply`, `terraform apply`,
+  `serverless deploy`, `docker push`, or any equivalent.
+- **No CI/CD triggers or bypasses.** No `workflow_dispatch`, no re-running
+  jobs, no `[skip ci]`, no editing a workflow file to make a check pass.
+  **CI stays the final gate — this workflow never replaces it.** A green
+  `gate.sh` is a local signal, not permission to skip CI.
+- **No reading or writing `.env*`, secrets, credentials, keys, or tokens.**
+  Not to debug, not to "check the format", not to confirm a variable name. A
+  task that needs a secret value stops and asks.
+- **No destructive database migrations.** No `DROP`, `TRUNCATE`, irreversible
+  `ALTER`, no `prisma migrate reset`, no `db push --accept-data-loss`. Propose
+  it in `change-summary.md` with the rollback plan; Irfan runs it.
+- **No package publishing.** No `npm publish`, `pnpm publish`, no registry
+  writes.
+- **No editing files outside your declared scope** — your task-spec's files,
+  your folders in scope, your own worktree. Nothing else.
+- **No broad codebase exploration outside your in-scope folders.** Grep
+  `docs/REGISTRY.md` or read a neighbour's context map instead.
+
+**The workflow's terminus is a local merge commit. Irfan pushes. Irfan
+deploys.** A node that believes it should do either has misread its job.

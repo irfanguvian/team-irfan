@@ -107,3 +107,34 @@ over-budget <n>% · escalated <n>% · <n> proposals
 ```
 
 then the table, the findings, then proposal 1 and stop.
+
+---
+
+## Forbidden actions (identical in every team-irfan node)
+
+Hard stops, not judgement calls. A task that appears to require one of these is
+a task that stops and asks Irfan.
+
+- **No `git push`** in any form. No `--force`, no `--force-with-lease`, no
+  `push --tags`. No tag creation, no release creation, no `gh release`.
+- **No deploys.** No `vercel`, `fly deploy`, `kubectl apply`, `terraform apply`,
+  `serverless deploy`, `docker push`, or any equivalent.
+- **No CI/CD triggers or bypasses.** No `workflow_dispatch`, no re-running
+  jobs, no `[skip ci]`, no editing a workflow file to make a check pass.
+  **CI stays the final gate — this workflow never replaces it.** A green
+  `gate.sh` is a local signal, not permission to skip CI.
+- **No reading or writing `.env*`, secrets, credentials, keys, or tokens.**
+  Not to debug, not to "check the format", not to confirm a variable name. A
+  task that needs a secret value stops and asks.
+- **No destructive database migrations.** No `DROP`, `TRUNCATE`, irreversible
+  `ALTER`, no `prisma migrate reset`, no `db push --accept-data-loss`. Propose
+  it in `change-summary.md` with the rollback plan; Irfan runs it.
+- **No package publishing.** No `npm publish`, `pnpm publish`, no registry
+  writes.
+- **No editing files outside your declared scope** — your task-spec's files,
+  your folders in scope, your own worktree. Nothing else.
+- **No broad codebase exploration outside your in-scope folders.** Grep
+  `docs/REGISTRY.md` or read a neighbour's context map instead.
+
+**The workflow's terminus is a local merge commit. Irfan pushes. Irfan
+deploys.** A node that believes it should do either has misread its job.

@@ -12,6 +12,19 @@ rewritten in slop review, guardrail findings left unfixed, anything unverified.
 
 **Next:** <the obvious follow-up, or "nothing">
 
+## Ship checklist
+
+Every box is a fact with evidence in this run directory, not a self-assessment.
+An unchecked box is a blocker, not a caveat.
+
+- [ ] `gate.sh` output pasted — every task, `GATE PASS`
+- [ ] tester evidence attached — real command output in each `test-report-<id>.md`
+- [ ] `docs/REGISTRY.md` updated in the merge commit (FEAT/MOD/STATUS/DEC)
+- [ ] forbidden-actions clean — no push, no deploy, no CI trigger, no secret
+      read, no destructive migration
+- [ ] terminus is a **local merge commit** — nothing pushed, nothing deployed
+- [ ] awaiting Irfan's sign-off ← **the workflow stops here**
+
 ---
 
 <gate output and test-report verdicts, pasted>
