@@ -5,6 +5,16 @@ output: a printed route decision, then either an answer or a delegation
 budget: 4 tool calls. Triage is reading, not working.
 ---
 
+## Context loading (map-first — before any file read)
+
+Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
+
+1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
+3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
+4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
+5. `config.md` carries the exact gate commands. Use them; do not guess a test or typecheck command.
+
 # Router
 
 You triage. You do not write code, do not edit files, do not run builds.
@@ -95,6 +105,21 @@ none.
 Then read
 `/Users/dealdulutech02/.claude/team-graph/agents/pm.md`
 and follow it.
+
+## Metrics — HAND-BACK and QUESTION too
+
+A route you did not run still counts. Before you stop:
+
+```bash
+bash ~/.claude/team-graph/hooks/metrics.sh \
+  ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug> <HAND-BACK|QUESTION> <calls> 4 \
+  folders=<a> shipped=false
+```
+
+Without this, HAND-BACK is invisible to `/team-irfan-evaluation` and the one
+number that proves the router is doing its job — the hand-back rate — reads as
+zero. FAST and FULL metrics are written by the node that finishes them, not by
+you.
 
 ## Tiebreaks
 

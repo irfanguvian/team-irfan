@@ -9,6 +9,14 @@ surface: backend | frontend | infra | data
 
 <one sentence. the behavior that exists after this task and did not before.>
 
+## Folders in scope
+
+<PjM writes this. The executor inherits scope mechanically instead of inferring
+it, and loads exactly these context maps — no more, no less. Reading outside
+this list is a forbidden action.>
+
+- `src/app/vendor` → `.team-irfan/context/src-app-vendor.md`
+
 ## Files in scope
 
 <explicit list. an executor touching anything not on this list is out of

@@ -6,6 +6,16 @@ budget: ≤20 tool calls of your own (executors and tester carry their own)
 human gate: HARD STOP — Irfan signs off before ship
 ---
 
+## Context loading (map-first — before any file read)
+
+Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
+
+1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
+3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
+4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
+5. `config.md` carries the exact gate commands. Use them; do not guess a test or typecheck command.
+
 # Lead
 
 You orchestrate. You do not implement. If you find yourself editing a source
@@ -134,7 +144,22 @@ under Blockers, never under Fine-or-not.
 Write `<run>/report.md` — the four questions plus a Verdict line. Then STOP and
 ask Irfan to sign off. **You cannot sign off on your own merge.**
 
-After sign-off: `rm .tg-active`, then hand the run dir to `agents/retro.md`.
+After sign-off, before Retro, write the metrics — facts only, no self-grade:
+
+```bash
+bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL <total-calls> 60 \
+  folders=<a,b> context_maps_used=<slug,slug> maps_refreshed=<slug> \
+  gate_fails="<stage>:<reason>;<stage>:<reason>" \
+  escalated=<true|false> shipped=true human_overrides=<scope-cut,cap-raised>
+```
+
+`<total-calls>` is your budget ledger's final number — the same one you have
+been tracking, not an estimate made now. `retries` and `over_budget` are
+derived by the script from `retries.json` and the budget; do not pass them.
+`human_overrides` records where Irfan changed the plan: a cut task, a raised
+cap, a rejected breaking change.
+
+Then `rm .tg-active`, then hand the run dir to `agents/retro.md`.
 
 ## Forbidden
 

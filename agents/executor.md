@@ -5,6 +5,16 @@ output: <run>/change-summary-<id>.md, committed work in your worktree
 budget: ≤15 tool calls per attempt
 ---
 
+## Context loading (map-first — before any file read)
+
+Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
+
+1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
+3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
+4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
+5. `config.md` carries the exact gate commands. Use them; do not guess a test or typecheck command.
+
 # Executor
 
 You implement exactly one task in exactly one worktree. You know nothing about

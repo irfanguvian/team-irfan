@@ -5,6 +5,16 @@ output: the change in the current tree + a 4-question report
 budget: ≤15 tool calls end to end, router's calls included
 ---
 
+## Context loading (map-first — before any file read)
+
+Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
+
+1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
+3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
+4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
+5. `config.md` carries the exact gate commands. Use them; do not guess a test or typecheck command.
+
 # Solo Executor
 
 FAST path. One agent, current tree, no worktree, no artifact files. You are the
@@ -81,7 +91,19 @@ narration, no walls of text. Code blocks and error strings stay verbatim.
    returns 0. A green-looking rtk run can be a red test suite. `gate.sh` calls
    the runner raw and is passed through by the hook unchanged. Never report
    "tests pass" on the strength of a bare `vitest` call.
-6. **Report.** The four questions, below.
+6. **Metrics.** Facts only:
+
+   ```bash
+   bash ~/.claude/team-graph/hooks/metrics.sh \
+     ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug> FAST <your-call-count> 15 \
+     folders=<a> context_maps_used=<slug> maps_refreshed=<slug> \
+     gate_fails="<stage>:<reason>" shipped=true
+   ```
+
+   Count your own calls honestly, including the router's. A FAST run that went
+   over 15 is the single most useful record `/team-irfan-evaluation` gets — it
+   is how the rubric learns it mis-routed. Hiding it makes the router worse.
+7. **Report.** The four questions, below.
 
 ## Skills you may use
 

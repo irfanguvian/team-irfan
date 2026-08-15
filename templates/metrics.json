@@ -1,0 +1,16 @@
+{
+  "id": "<yyyymmdd-slug>",
+  "date": "<yyyy-mm-dd>",
+  "route": "HAND-BACK|QUESTION|FAST|FULL",
+  "folders": [],
+  "tool_calls": 0,
+  "budget": 0,
+  "over_budget": false,
+  "gate_fails": [],
+  "retries": 0,
+  "escalated": false,
+  "context_maps_used": [],
+  "maps_refreshed": [],
+  "human_overrides": [],
+  "shipped": false
+}

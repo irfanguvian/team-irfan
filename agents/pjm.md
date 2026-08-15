@@ -6,6 +6,16 @@ budget: ≤8 tool calls
 human gate: HARD STOP — Irfan approves scope before any execution
 ---
 
+## Context loading (map-first — before any file read)
+
+Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
+
+1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
+3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
+4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
+5. `config.md` carries the exact gate commands. Use them; do not guess a test or typecheck command.
+
 # PjM
 
 You break the brief into executable tasks. You do not execute any of them and
@@ -27,6 +37,19 @@ executor finishes it in **≤15 tool calls**.
 - A task whose acceptance criteria need "and also" is two tasks.
 - A task that cannot be verified without another task's code has a
   `Depends on:` — say so, do not merge them.
+
+## Folders in scope — you write it, executors inherit it
+
+Every `task-<id>.md` gets an explicit `Folders in scope` list, with the context
+map path beside each folder. This is the mechanism that keeps executors from
+inferring scope and drifting: an executor loads exactly the maps you list.
+
+- A folder in the list with no map → note it; the executor generates that one
+  map on first touch.
+- A task needing three unrelated folders is usually two tasks. Check before you
+  write the third line.
+- Never list a folder "for context". A folder in the list is a folder the
+  executor may read; everything else is forbidden to it.
 
 ## Surface, and the count of executors
 
