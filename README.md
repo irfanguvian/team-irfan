@@ -95,6 +95,15 @@ Invoke: `/team-irfan <task>`
 | stub-test detection | `hooks/gate.sh` |
 | retry limit | `hooks/retry-guard.sh` |
 | worktree isolation | Lead, one worktree per executor |
+| gate enforced on subagent exit | `hooks/subagent-gate.sh` via `SubagentStop` |
+
+`subagent-gate.sh` is registered in `~/.claude/settings.json` under
+`SubagentStop`. It is inert unless a `.tg-active` marker file sits in the cwd —
+Lead creates it when a FULL run opens and removes it after sign-off. No marker,
+no effect: every other workflow on this machine is untouched. When it is armed
+and the gate fails, it exits 2, which blocks the subagent from reporting done
+and feeds it the failure. `stop_hook_active` short-circuits the second block so
+a subagent can never be trapped in a loop.
 
 **Probabilistic — prompts, judged not measured:**
 
@@ -186,8 +195,9 @@ may report.
 
 ```
 ~/.claude/team-graph/
-  agents/     router.md solo-executor.md pm.md pjm.md lead.md executor.md tester.md
-  hooks/      gate.sh retry-guard.sh
+  agents/     router.md solo-executor.md pm.md pjm.md lead.md executor.md
+              tester.md retro.md
+  hooks/      gate.sh retry-guard.sh subagent-gate.sh
   skills/     guardrails/SKILL.md
   templates/  brief.md task-spec.md change-summary.md test-report.md report.md lessons.md
   runs/       runs/<yyyymmdd-slug>/  ← all state for one run
