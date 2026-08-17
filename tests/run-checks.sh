@@ -22,7 +22,7 @@ head2() { echo; echo "── $1"; }
 # The harness must leave the fixture exactly as it found it. A check run that
 # mutates the repo it lives in makes the next run test something different.
 cleanup() {
-  rm -f "$FIXTURE/src/stub.test.ts" "$FIXTURE/src/typeerror.ts"
+  rm -f "$FIXTURE/src/stub.test.ts" "$FIXTURE/src/typeerror.ts" "$FIXTURE/.tg-active"
   rm -f "$FIXTURE/src/vacuous.ts" "$FIXTURE/src/vacuous.test.ts" "$FIXTURE/src/cart.ts.mutbak"
   find "$FIXTURE/src" -name '*.tg-mutant-bak' -delete 2>/dev/null
   git -C "$FIXTURE" checkout -- src 2>/dev/null
@@ -652,6 +652,108 @@ for f in "$TG"/agents/*.md; do
   [ "$L" -le "$CAP" ] && ok "$a.md $L/$CAP lines" \
     || bad "$a.md is $L lines, over its $CAP cap — delete before you add"
 done
+
+# ── 22. subagent-gate.sh: inert, blocking, loop-trapped ──────────────────────
+# The hook item D auto-wires on install. Its three invariants were prose-only
+# until now: no marker → zero effect on any other workflow; marker + red gate →
+# block with the reason; stop_hook_active → never block twice (the loop trap).
+head2 "22. subagent-gate.sh: inert without marker, blocks on red gate, loop-trapped"
+SGATE="$TG/hooks/subagent-gate.sh"
+rm -f .tg-active
+
+# (a) no .tg-active → exit 0, silent
+OUT=$(echo '{}' | bash "$SGATE" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && [ -z "$OUT" ] \
+  && ok "inert with no .tg-active (exit 0, no output)" \
+  || bad "fired outside a run (rc=$RC, out: $OUT)"
+
+# (b) marker + failing unit test → exit 2, stderr carries the gate reason
+touch .tg-active
+cp src/cart.test.ts src/cart.test.ts.bak
+printf "\nimport { it as it_, expect as expect_ } from 'vitest'\nit_('deliberately failing check', () => { expect_(1).toBe(2) })\n" >> src/cart.test.ts
+OUT=$(echo '{}' | bash "$SGATE" 2>&1); RC=$?
+[ "$RC" -eq 2 ] && ok "red gate under marker → exit 2" || bad "expected exit 2, got $RC"
+grep -q 'GATE FAIL' <<< "$OUT" \
+  && ok "block message carries GATE FAIL reason" || bad "no GATE FAIL in block output"
+
+# (c) same red gate + stop_hook_active → exit 0. Blocking again traps the
+# subagent in a loop; the trap needs jq to read the payload.
+if command -v jq >/dev/null 2>&1; then
+  OUT=$(echo '{"stop_hook_active":true}' | bash "$SGATE" 2>&1); RC=$?
+  [ "$RC" -eq 0 ] && ok "stop_hook_active honoured (exit 0, no re-block)" \
+                  || bad "re-blocked an already-blocked subagent (rc=$RC)"
+else
+  ok "stop_hook_active check skipped (no jq on this machine)"
+fi
+mv src/cart.test.ts.bak src/cart.test.ts
+rm -f .tg-active
+
+# ── 23. plugin manifest wires exactly the two documented hooks ───────────────
+# The plugin exists to replace the manual settings.json edit, not to widen it:
+# exactly two events, each pointing at a script that exists and that the README
+# install section names. A third event or a relocated script is drift.
+head2 "23. plugin manifest: two events, real scripts, same ones README names"
+if node -e '
+  const fs = require("fs"), path = require("path");
+  const TG = process.argv[1];
+  const fail = m => { console.error(m); process.exit(1); };
+
+  const plugin = JSON.parse(fs.readFileSync(path.join(TG, ".claude-plugin/plugin.json"), "utf8"));
+  if (plugin.name !== "team-irfan") fail("plugin.json name is " + plugin.name);
+  if (!plugin.hooks) fail("plugin.json declares no hooks file");
+  const hooksPath = path.join(TG, plugin.hooks);
+  const cfg = JSON.parse(fs.readFileSync(hooksPath, "utf8")).hooks;
+
+  const events = Object.keys(cfg).sort();
+  if (events.join(",") !== "PostToolUse,SubagentStop")
+    fail("expected exactly PostToolUse,SubagentStop — got " + events.join(","));
+
+  const WANT = {
+    PostToolUse:  "hooks/ledger.sh hook",
+    SubagentStop: "hooks/subagent-gate.sh",
+  };
+  const readme = fs.readFileSync(path.join(TG, "README.md"), "utf8");
+  for (const [event, tail] of Object.entries(WANT)) {
+    const cmds = cfg[event].flatMap(m => m.hooks).map(h => h.command);
+    if (cmds.length !== 1) fail(event + " registers " + cmds.length + " commands, expected 1");
+    const cmd = cmds[0];
+    if (!cmd.startsWith("bash ${CLAUDE_PLUGIN_ROOT}/"))
+      fail(event + " command does not use ${CLAUDE_PLUGIN_ROOT}: " + cmd);
+    if (!cmd.endsWith(tail)) fail(event + " command is not " + tail + ": " + cmd);
+    const script = tail.split(" ")[0];
+    if (!fs.existsSync(path.join(TG, script))) fail(tail + " points at a missing script");
+    if (!readme.includes(script)) fail("README install section does not name " + script);
+  }
+' "$TG" 2>"$TMP/perr"; then
+  ok "plugin.json → hooks.json: PostToolUse=ledger, SubagentStop=gate, nothing else"
+else
+  bad "plugin manifest invalid: $(cat "$TMP/perr")"
+fi
+
+# ── 24. doctor.sh: hermetic install-health verdicts ──────────────────────────
+# Doctor reads the hook-registration file it is handed, never the machine's
+# real config — that is what keeps this check deterministic on any machine.
+# TG_DOCTOR_FAST=1 skips the run-checks step so the check cannot recurse.
+head2 "24. doctor.sh: healthy install PASSes, broken install names the failure"
+
+# (a) synthetic registration file carrying both hooks → every line PASS, exit 0
+GOOD="$TMP/doctor-good.json"
+printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bash x/hooks/ledger.sh hook"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$GOOD"
+OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$GOOD" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'DOCTOR PASS' <<< "$OUT" && ! grep -q '^  FAIL' <<< "$OUT" \
+  && ok "healthy install → all PASS, DOCTOR PASS, exit 0" \
+  || bad "healthy install misdiagnosed (rc=$RC): $(grep '  FAIL' <<< "$OUT")"
+
+# (b) same file with the PostToolUse/ledger entry removed → a FAIL line naming
+# the ledger hook, non-zero exit
+BADF="$TMP/doctor-bad.json"
+printf '{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$BADF"
+OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$BADF" 2>&1); RC=$?
+[ "$RC" -ne 0 ] && ok "unwired ledger → exit $RC (non-zero)" || bad "doctor passed a broken install"
+grep -q 'FAIL  ledger hook' <<< "$OUT" \
+  && ok "FAIL line names the ledger hook" || bad "failure does not name the ledger hook"
+grep -q 'DOCTOR FAIL' <<< "$OUT" \
+  && ok "verdict is DOCTOR FAIL" || bad "DOCTOR FAIL verdict missing"
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

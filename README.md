@@ -29,6 +29,25 @@ from.
 git clone https://github.com/irfanguvian/team-irfan.git ~/.claude/team-graph
 ```
 
+**The clone location is load-bearing.** Every agent prompt references
+`~/.claude/team-graph/...` by absolute path; installing anywhere else leaves
+the graph pointing at nothing.
+
+### Hooks via plugin (recommended)
+
+Wire both hooks — the SubagentStop quality gate and the PostToolUse tool-call
+ledger — in one step, no `settings.json` editing. In Claude Code:
+
+```
+/plugin marketplace add ~/.claude/team-graph
+/plugin install team-irfan@team-irfan
+```
+
+The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. Both hooks
+stay **inert without a `.tg-active` marker** in the working directory, exactly
+as in the manual install below — installing the plugin changes nothing for any
+other workflow.
+
 Register the slash commands — create `~/.claude/commands/team-irfan.md`:
 
 ```markdown
@@ -56,6 +75,11 @@ description: Aggregate run metrics, find routing errors, propose prompt diffs
 Read `~/.claude/team-graph/agents/evaluation.md` and follow it exactly.
 Counts come from `runs/*/metrics.json` only, never from prose.
 ```
+
+### Manual install (fallback)
+
+Skip this section if you installed the plugin above — it wires the same two
+hooks to the same two scripts.
 
 Optional — enforce the quality gate on subagent exit. Add to
 `~/.claude/settings.json` (additive; nothing else changes):
@@ -96,8 +120,14 @@ Verify the install:
 
 ```bash
 cd ~/.claude/team-graph/tests/fixture && npm install
-bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 174 passed, CHECKS PASS
+bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 183 passed, CHECKS PASS
+bash ~/.claude/team-graph/hooks/doctor.sh         # expect: DOCTOR PASS
 ```
+
+`doctor.sh` checks install health — hooks registered, fixture deps, a live
+ledger wiring probe, hook inertness without `.tg-active` — one PASS/FAIL line
+per item. Plugin install? Point it at the manifest instead:
+`bash ~/.claude/team-graph/hooks/doctor.sh ~/.claude/team-graph/hooks/hooks.json`.
 
 ---
 

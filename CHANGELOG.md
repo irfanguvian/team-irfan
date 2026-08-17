@@ -5,6 +5,42 @@ project's.
 
 ---
 
+## v2.3.0 — 2026-08-17
+
+Implements the APPROVED LIST (D, F, I) of
+[`docs/evaluations/review-20260817.md`](docs/evaluations/review-20260817.md).
+No agent prompt changed; zero effect on per-route tool-call budgets. Checks go
+174 → 183, zero failed.
+
+### Added
+
+- **Item D — plugin packaging.** `.claude-plugin/plugin.json` +
+  `.claude-plugin/marketplace.json` + `hooks/hooks.json` wire the SubagentStop
+  gate and the PostToolUse ledger on `/plugin install`, replacing the manual
+  `settings.json` edit the README called "required for honest budget numbers".
+  Both hooks stay `.tg-active`-gated; the repo stays at `~/.claude/team-graph`
+  because agent prompts reference it by absolute path. Covered by check 23:
+  exactly two events, `${CLAUDE_PLUGIN_ROOT}` commands, scripts exist and match
+  the ones README names. Effect: removes the unwired-ledger install (the source
+  of v2.1's self-counted 150) rather than any runtime call.
+- **Item F — `hooks/doctor.sh`.** One command verifying install health:
+  hook registration (in whatever JSON file it is handed — settings.json or
+  hooks.json, hermetic by argument), fixture deps, a live ledger wiring probe,
+  subagent-gate inertness without the marker, and the run-checks verdict
+  (skippable via `TG_DOCTOR_FAST=1`). PASS/FAIL per item, non-zero exit on any
+  FAIL. Covered by check 24: healthy synthetic install → all PASS + exit 0;
+  registration file missing the ledger entry → FAIL line naming the ledger
+  hook + non-zero exit. Effect: zero runtime calls; broken installs get caught
+  before a run produces untrustworthy numbers.
+- **Item I — subagent-gate.sh test coverage.** The hook had zero coverage while
+  item D began auto-wiring it. Check 22 now asserts its three invariants: inert
+  without `.tg-active` (exit 0, silent), exit 2 with the `GATE FAIL` reason
+  under a marker and a red gate, and exit 0 on `stop_hook_active` (the loop
+  trap). Effect: reliability only — the isolation other workflows depend on is
+  now a failing check instead of a comment.
+
+---
+
 ## v2.2.0 — 2026-08-15
 
 **The numbers behind v2.1's headline were produced by an LLM counting its own

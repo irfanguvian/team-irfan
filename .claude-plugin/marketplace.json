@@ -1,0 +1,11 @@
+{
+  "name": "team-irfan",
+  "owner": { "name": "irfanguvian" },
+  "plugins": [
+    {
+      "name": "team-irfan",
+      "source": "./",
+      "description": "team-irfan agent graph — deterministic quality gate and tool-call ledger, armed only inside a .tg-active run"
+    }
+  ]
+}
