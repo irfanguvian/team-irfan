@@ -1,0 +1,1 @@
+Add `GET /invoices/:id/refunds`. Paginated (`page`, `limit`, default 20, max 100), guarded by the existing auth guard, returns refunds newest-first. Follow the patterns already used by the invoices list endpoint. Include unit and e2e tests.
