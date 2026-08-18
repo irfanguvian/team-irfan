@@ -1,0 +1,30 @@
+TASK   ARM      ROUNDS
+----   ---      ------
+T1     bare      1:done 2:done 3:done
+T1     omc       1:done 2:done 3:done
+T1     team      1:done 2:done 3:done
+T4     bare      1:done 2:done 3:done
+T4     omc       1:done 2:done 3:done
+T4     team      1:done 2:done 3:done
+T2     bare      1:done 2:done 3:done
+T2     omc       1:done 2:done 3:done
+T2     team      1:-- 2:-- 3:--
+T3     bare      1:-- 2:-- 3:--
+T3     omc       1:-- 2:-- 3:--
+T3     team      1:-- 2:-- 3:--
+
+scored rows in runs/results.csv: 24
+
+to finish, in order:
+  bin/init.sh                      # refresh configs — OAuth tokens expire
+  bin/selftest.sh                  # confirm the scorer still grades correctly
+  bin/run.sh all --tasks T2,T3
+  bin/score.sh all && bin/publish.sh full
+
+note: run.sh rebuilds a worktree for every cell it runs, including cells
+      that already have results. To avoid re-spending on finished work,
+      run only the missing task/arm pairs:
+      bin/run.sh all --tasks T2 --arms team
+      bin/run.sh all --tasks T3 --arms bare
+      bin/run.sh all --tasks T3 --arms omc
+      bin/run.sh all --tasks T3 --arms team

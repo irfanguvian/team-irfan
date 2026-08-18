@@ -19,6 +19,20 @@ build_configs() {
   rm -rf "$H/configs"
   mkdir -p "$H/configs"/{bare,omc,team}
 
+  # Credentials. On macOS the live token sits in the Keychain, which a non-default
+  # CLAUDE_CONFIG_DIR cannot reach — without this every arm answers "Not logged
+  # in". These files are mode 600 and configs/ is gitignored, but they ARE a
+  # plaintext copy of the OAuth token: delete configs/ when the run is finished.
+  # OAuth tokens expire, so a resume weeks later must re-run this script.
+  if creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null); then
+    for arm in bare omc team; do
+      printf '%s' "$creds" | jq '{claudeAiOauth}' > "$H/configs/$arm/.credentials.json"
+      chmod 600 "$H/configs/$arm/.credentials.json"
+    done
+  else
+    echo "warning: no Keychain credentials found — arms will not authenticate" >&2
+  fi
+
   # Auth and onboarding state live in ~/.claude.json, which Claude Code reads from
   # inside CLAUDE_CONFIG_DIR. Without it every arm answers "Not logged in".
   # `projects` (per-directory history and trust) and `mcpServers` are dropped: the

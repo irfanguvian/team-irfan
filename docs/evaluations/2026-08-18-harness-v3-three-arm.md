@@ -4,6 +4,10 @@ First run of `benchmarks/harness-v3`. Head-to-head: **team-irfan** vs **bare
 Claude Code** vs **OMC**, same model (`claude-opus-5`), same fixture repo, same
 task text, three rounds each.
 
+Raw numbers, coverage, and the median table live in one folder:
+`benchmarks/harness-v3/results/2026-08-18-partial/`. How to finish the remaining
+12 cells: `benchmarks/harness-v3/RESUME.md`.
+
 **This is a partial run.** 24 of 36 cells completed before the run was stopped by
 the operator. T3 — the ambiguous task with the consumer-contract trap, and the
 single most likely task to separate the arms — never ran. Every number below is

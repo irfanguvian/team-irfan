@@ -18,7 +18,14 @@ bin/selftest.sh                    # prove the scorer works. no agents, no cost
 bin/run.sh all --dry-run           # see exactly what would be spawned. costs nothing
 bin/run.sh all                     # 36 agent sessions. this is the expensive part
 bin/score.sh all                   # hidden tests, gates, tokens -> runs/results.csv
+bin/publish.sh <label>             # freeze it into results/<label>/ — the durable artifact
 bin/report.sh > REPORT.md          # medians + the four hypothesis verdicts
+```
+
+Picking it back up after a break — always start here:
+
+```bash
+bin/status.sh                      # what ran, what did not, and the exact commands to finish
 ```
 
 Smaller first run — the two tasks most likely to falsify a hypothesis:
@@ -180,6 +187,9 @@ harness-v3/
   bin/collect.sh     one run -> json (tokens, tool calls, cost)
   bin/report.sh      results.csv -> the report
   bin/selftest.sh    canned patches -> asserts the scorer grades them correctly
+  bin/status.sh      coverage matrix + the commands to finish a partial run
+  bin/publish.sh     freeze runs/results.csv into results/<label>/
+  results/           published results, one folder per run. start here to read numbers
   selftest/          those patches: one correct fix per task, plus both band-aids
   fixture/           the NestJS + Prisma + SQLite service under test
   variants/t4/       the broken date helper that t4-base ships with
@@ -216,6 +226,21 @@ patches for the agent and asserts the grade:
 
 All six pass today. If any stops passing, the benchmark is measuring nothing and
 no run is worth starting.
+
+## Results
+
+Published runs live in `results/<label>/`, one folder each:
+
+| File | What it is |
+|---|---|
+| `SUMMARY.md` | the median table — read this first |
+| `results.csv` | one row per scored cell, every metric |
+| `COVERAGE.txt` | which cells ran, and the commands to finish the rest |
+
+Latest: **`results/2026-08-18-partial/`** — 24 of 36 cells. T3 never ran, so H1
+and H3 are untested. The write-up is
+`docs/evaluations/2026-08-18-harness-v3-three-arm.md`; how to finish it is
+[RESUME.md](RESUME.md).
 
 ## Known deviations from the spec
 
