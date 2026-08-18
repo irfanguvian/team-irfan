@@ -27,7 +27,7 @@ scope — it reports it, it does not fix it.>
 
 ## Acceptance criteria
 
-<checkable, derived from brief.md. the tester writes cases from THESE, never
+<checkable, derived from the plan. QA writes its e2e cases from plan.json, never
 from the diff.>
 
 - [ ] <criterion>

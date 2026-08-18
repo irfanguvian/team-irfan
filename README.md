@@ -15,8 +15,9 @@ The design goal is not "more agents". It is **spending fewer tool calls than
 doing it yourself would cost**, and refusing to run at all when it wouldn't.
 
 **New here?** [`docs/workflow.md`](docs/workflow.md) walks the whole graph
-visually — the triage tree, the FULL pipeline and its three human gates, where
-state lives, the context-loading decision, and the budget model.
+visually — the triage tree, the 7-step FULL pipeline and its single human gate
+(the plan), where state lives, the context-loading decision, and the budget
+model.
 [`CHANGELOG.md`](CHANGELOG.md) is what changed and why;
 [`docs/evaluations/`](docs/evaluations/) is the measured record each change came
 from.
@@ -120,7 +121,7 @@ Verify the install:
 
 ```bash
 cd ~/.claude/team-graph/tests/fixture && npm install
-bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 183 passed, CHECKS PASS
+bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 205 passed, CHECKS PASS
 bash ~/.claude/team-graph/hooks/doctor.sh         # expect: DOCTOR PASS
 ```
 
@@ -142,7 +143,7 @@ Triages, then acts. Four outcomes:
 | **HAND-BACK** | under ~5 min by hand, or too ambiguous to triage | one line: `faster manually: <reason>`, then stops | — |
 | **QUESTION** | asks something rather than changing something | answered directly, zero agents | — |
 | **FAST** | ≤2 files, known pattern, no schema/contract change | one executor → quality gate → report | ≤15 calls |
-| **FULL** | everything else | the full pipeline below | ≤60 calls |
+| **FULL** | everything else | the 7-step pipeline below | ≤60 to plan approval, then the plan's `run_cap` |
 
 ```bash
 /team-irfan "fix the off-by-one in the bulk discount threshold"
@@ -244,86 +245,83 @@ compiles. One `git diff` per folder is cheaper than being wrong once.
 
 ---
 
-## The FULL pipeline
+## The FULL pipeline — 7 steps, one human gate
 
 **Topology is a star, not a chain.** The orchestrator runs in the main thread;
 every other node is a **leaf subagent** — one artifact in, one artifact out,
 spawns nothing.
 
 That isn't a style choice. The orchestrator is the only context with a channel
-to you, and this pipeline has three hard human gates. A subagent cannot stop and
-ask — so a gate held by a subagent silently degrades into an assumption with a
-checkbox. The gates live in the main thread, and therefore nothing nests.
-
-It also means the pipeline doesn't depend on whether nested subagent spawning
-works in your harness. Every node is a leaf, so the question never arises.
+to you, and this pipeline has exactly ONE hard human gate — the plan approval.
+A subagent cannot stop and ask — so a gate held by a subagent silently degrades
+into an assumption with a checkbox. The gate lives in the main thread, and
+therefore nothing nests.
 
 ```
 ORCHESTRATOR (main thread)
   │  owns: the sequence · the budget ledger · every git operation
-  │        · every conversation with you
+  │        · the one conversation with you
   │
-  ├─ PM ──────────────────► brief.md
-  │    Every business rule carries a source: a file:line, a registry id, or
-  │    "confirmed by you". A rule it inferred is not a rule — it's a question.
-  │     ⏸ YOU ANSWER ⏸
+  │  STEP 1 — PLAN
+  ├─ PM ──────────────────► scope.md
+  │    Scope-in / scope-out / open questions. Every rule carries a source:
+  │    file:line, registry R-id, or "ask user". No gate of its own — the
+  │    questions travel into the plan.
+  ├─ LEAD (mode=options) ─► options.md
+  │    1–3 solution options, never more: approach, files, risk,
+  │    expected_calls. One marked recommended, one line of why.
+  ├─ PJM ─────────────────► plan.md + plan.json + task-<id>.md per task
+  │    Restates the task as a verifiable work list, folds in scope and
+  │    options, chooses one. run_cap = min(round(expected_calls × 1.3), 60).
+  ├─ hooks/plan-gate.sh ──► deterministic, zero LLM. Schema, option count,
+  │    chosen id, numeric calls, run_cap arithmetic, non-empty scope.
+  │    Output pasted BEFORE the question. Fail → PjM regenerates (max 2,
+  │    then HAND-BACK with the error).
+  │     ⏸ YOU APPROVE THE PLAN ⏸   plan.md printed in chat in FULL first;
+  │                                the question carries no plan content.
+  │                                Silence is not approval. The ONLY gate.
+  │    On approval, run_cap replaces the static 60 (ledger.sh cap <run>).
   │
-  ├─ PjM ─────────────────► tasks.md + one task-spec per task
-  │    Executor count comes from the breakdown. Backend-only work spawns
-  │    zero frontend agents. The SCOPE block draws the execution path —
-  │    parallel lanes, merge points — and names the rejected alternative.
-  │     ⏸ YOU APPROVE SCOPE ⏸   the full plan is printed in chat FIRST;
-  │                             the approval question carries no plan content.
-  │                             Silence is not approval.
-  │
-  ├─ INIT ×folders ──────► .team-irfan/context/<slug>.md
-  │    One map per in-scope folder that lacks one. A leaf cannot spawn init,
-  │    so this happens here or it never happens at all.
-  │
+  │  STEP 2 — EXECUTE + TEST-CASE GEN, in parallel
   ├─ git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
-  │    One per task, never shared. Branches inherit the goal's type.
+  ├─ EXECUTOR ×N ─────────► change-summary-<id>.md + GATE PASS
+  │    Parallel lanes only where the task-spec says independent: yes.
+  ├─ QA (phase=cases) ────► test-cases.md — from plan.json ONLY, blind to
+  │    every diff and worktree. Backend: executable curl cases with
+  │    status+body assertions. Frontend: chrome-devtools-axi steps, or a
+  │    manual checklist that says so. gate.sh fails assertion-free cases.
   │
-  ├─ EXECUTOR ×N ─────────► change-summary.md + GATE PASS
-  │    Independent ones run concurrently. Ponytail rules: reuse before writing,
-  │    stdlib before dependency, root cause not symptom.
+  │  STEP 3 — QA RUNS (per finished task)
+  ├─ QA (phase=run) ──────► test-report-<id>.md — each case PASS/FAIL with
+  │    pasted command output. No narrative verdicts.
   │
-  ├─ TESTER ──────────────► test-report.md
-  │    Writes test cases from the SPEC, before looking at the diff. Runs the
-  │    exact verify commands from change-summary.md. Real curl/browser evidence.
-  │    FAIL → same executor, same worktree, with the bug block.
-  │           Max 2 retries, then ESCALATE. No silent loops.
+  │  STEP 4 — FIX LOOP, HARD-CAPPED
+  │    FAIL → only the failing cases + evidence, SAME executor, SAME
+  │    worktree. retry-guard.sh: max 2 retries. 3rd failure → the run STOPS,
+  │    BLOCKED written to blocked.log by the hook, evidence into the
+  │    summary, handed to you. No "continue?" loop.
   │
-  ├─ git merge --squash · commit · worktree remove
-  │    ONE COMMIT PER TASK. --squash collapses a single worktree's own
-  │    in-progress commits — it is not a way to fold separate tasks together.
-  │    The docs/REGISTRY.md entry is staged with the last task's commit.
+  │  STEP 5 — MERGE + LEAD REVIEW (machine gate, no human)
+  ├─ git merge --squash · commit · worktree remove   (one commit per task,
+  │    registry entry staged with the last one)
+  ├─ LEAD (mode=review) ──► report.md · verdict PASS | BLOCKED
+  │    Merged diff only, vs the pre-run base. Backward compatibility listed
+  │    explicitly — a breaking change is BLOCKED, never a footnote.
+  │    typecheck/lint/tests/build via gate.sh, output pasted. No files
+  │    outside plan.json scope_folders. BLOCKED + fixable → back to the
+  │    executor within the same retry budget; else the run stops.
   │
-  ├─ LEAD ────────────────► review of the MERGED diff + report.md
-  │    Reviews the merged diff, not each worktree — the bug that matters is the
-  │    one two tasks create together. Max 2 review rounds.
-  │     ⏸ YOU SIGN OFF ⏸    breaking change = blocker, never a footnote
+  │  STEP 6 — SUMMARY
+  ├─ .team-irfan/handoffs/<date>-<slug>.md — one line per node, diff --stat,
+  │    case pass/fail counts, paste-able test commands, breaking changes,
+  │    lessons (max 3 lines — this IS the retro), mermaid of what ran,
+  │    one-line verdict. Printed in chat too. metrics.json from the ledger.
   │
-  ├─ SHIP BLOCK ──────────► printed, and .team-irfan/handoffs/<date>-<slug>.md
-  │    What landed · How to run · How to test · Proof · Not done · Verdict.
-  │    "How to test" is the literal paste-able command. "Proof" is pasted
-  │    gate.sh output, never a summary of it. Session state — never pushed.
-  │
-  ├─ STAKEHOLDER REPORT ──► docs/reports/<date>-<slug>.md — written, NEVER
-  │    committed; you read it and commit it yourself. What was done · changes
-  │    (diff --stat pasted) · effect · breaking changes · blockers · how to
-  │    test with copy-pasteable curl per changed endpoint · verdict. Built
-  │    from pasted command output, not narrative.
-  │
-  └─ RETRO ───────────────► lessons.md, shown to you.
-                            Never edits CLAUDE.md, a skill, or a hook.
+  └─ STEP 7 — END. The session terminates. Nothing else runs.
 ```
 
 One progress line reaches you as each node returns —
-`[3/10] pjm done · 5 tasks · budget 12/60`. Node, one fact, budget. A run that
-prints nothing between "starting" and a commit appearing is a run you have to
-audit out of git, which costs more than the run saved.
-
----
+`[3/7] pjm done · 2 tasks · budget 12/39`. Node, one fact, budget.
 
 ## Quality gate
 
@@ -336,10 +334,13 @@ audit out of git, which costs more than the run saved.
 5. **Stub detection** — `expect(true)`, `assert.ok(true)`, `.skip(`, `.only(`,
    `it.todo`, `xit(`, and multi-line empty test bodies. Any hit fails with
    `file:line`.
+5b. **Assertion-free test cases** — with `TG_RUN` set, `<run>/test-cases.md`
+   is scanned: a CASE with no non-empty `expect_body`/`expect_effect`, or an
+   `expect(true)`-style line, fails with the case named.
 6. **Mutation smoke** (opt-in, `TG_MUTATE=1`) — replaces each changed
    implementation with throwing stubs and re-runs that file's tests. A suite
    still green without the code it covers is asserting nothing:
-   `GATE FAIL: tests survive mutation`. The Tester runs it; executors do not,
+   `GATE FAIL: tests survive mutation`. QA runs it; executors do not,
    because it re-runs the suite once per changed file.
 7. `GATE PASS` or `GATE FAIL: <reason>`
 
@@ -349,7 +350,7 @@ not a report.
 ```bash
 bash hooks/gate.sh                    # from a project root
 TG_SCAN=all bash hooks/gate.sh        # scan every test file, not just changed
-TG_MUTATE=1 bash hooks/gate.sh        # + mutation smoke (slow, Tester only)
+TG_MUTATE=1 bash hooks/gate.sh        # + mutation smoke (slow, QA only)
 ```
 
 > **If you use RTK:** `gate.sh` deliberately calls `tsc`/`vitest` raw. Measured:
@@ -381,36 +382,42 @@ Every agent carries an identical forbidden-actions block:
 
 ## Efficiency contract
 
-- **FAST ≤15 tool calls. FULL ≤60 per feature**, everyone's calls included.
-  A PostToolUse hook keeps the ledger — `hooks/ledger.sh`, appending one line per
-  tool call to `<run>/ledger.log` — and the orchestrator reads it. It does not
-  count. A number the measured party types is not a measurement, and every
-  routing conclusion downstream inherits its error. At 60 the run stops with a
-  partial report rather than overrunning silently.
+- **FAST ≤15 tool calls. FULL: ≤60 until the plan is approved, then the
+  plan's own `run_cap`** — `min(round(chosen option's expected_calls × 1.3),
+  60)`, computed by PjM and verified by `plan-gate.sh`. A PostToolUse hook
+  keeps the ledger — `hooks/ledger.sh`, appending one line per tool call to
+  `<run>/ledger.log` — and the orchestrator reads it. It does not count. A
+  number the measured party types is not a measurement. At the cap the run
+  stops with a partial summary rather than overrunning silently.
 - **The cap is checked mechanically, before every spawn.** `ledger.sh read`
-  runs before each node; at or over the cap, nothing spawns. The cap moves
-  only when you state a new number in chat (`cap-raised:<n>` in the metrics) —
-  "keep going" is not a number. A second raise on one run is a PjM sizing
-  failure, and the orchestrator says so when it asks.
-- Per-node budgets are **ceilings, not allowances**, and deliberately don't sum
-  to 60 — a 2-task feature at every ceiling would spend ~100. Realistic
-  projection is roughly `20 + 27×tasks`; over 60, the orchestrator asks you to
-  raise the cap or cut scope **before** the first worktree.
+  and `ledger.sh cap` (plan.json `run_cap`, fallback 60) run before each
+  node; at or over the cap, nothing spawns. The cap moves only when you state
+  a new number in chat (`cap-raised:<n>` in the metrics) — "keep going" is
+  not a number. A second raise on one run is a plan-sizing failure, and the
+  orchestrator says so when it asks.
+- Per-node budgets are **ceilings, not allowances**, and deliberately don't
+  sum to the cap. The projection is in the plan itself — each option's
+  `expected_calls` — so the cap is set with the number visible, at the plan
+  gate, not discovered at call 150.
 - **Agents never read whole trees.** Context maps first, then `docs/REGISTRY.md`
   by tag (`head -40`, `grep -n "FEAT:"`, `sed -n` the hits — never `cat`), then
   targeted files.
 - **More tasks is more overhead, not more parallelism.** Each task buys a
-  worktree, an executor, a tester and a merge. Splitting is for work that
+  worktree, an executor, a QA run and a merge. Splitting is for work that
   genuinely cannot share a file — never for work that merely can be described in
   more sentences. PjM prints the projection in the SCOPE block so the cap is
   raised with the number visible, not discovered at call 150.
-- **Retry limit 2, then escalate.** No silent loops.
+- **Retry limit 2, then the run stops.** The 3rd failure writes a hook-owned
+  `BLOCKED` to `<run>/blocked.log`; the failing cases and evidence go into
+  the summary. No silent loops, no in-chat "continue?".
 - **Wall clock is measured, not capped.** Executors report elapsed minutes and
   must justify anything over 15. There is no hard abort: an agent cannot watch a
   clock while a tool call is in flight, so a prompt-level timeout is theatre. The
   number exists to tell scope from thrash.
-- Reports are always four questions — Done / Fine or not / Blockers / Next —
-  plus a verdict line.
+- FAST reports are four questions — Done / Fine or not / Blockers / Next —
+  plus a verdict line. FULL ends with the summary: one line per node, pasted
+  `diff --stat`, case counts, paste-able test commands, breaking changes,
+  lessons (max 3 lines), a verdict.
 
 ---
 
@@ -425,7 +432,7 @@ deterministic check.
 | stub-test detection, mutation smoke | test-case design |
 | retry limit / escalation | convention extraction |
 | worktree isolation, crash reaping | documentation |
-| package manager + command detection | retro feedback |
+| package manager + command detection | lessons in the summary |
 | the tool-call ledger | scope and sizing |
 | the resume point | why a run went wrong |
 
@@ -459,21 +466,25 @@ registered subagents and nothing parses their frontmatter.
 ## Layout
 
 ```
-graph.json   the FULL pipeline as data — nodes, edges, human gates, effect
-             policies. Validated by the checks: acyclic, every agent node a
-             leaf, three human-approval nodes, and every policy matching the
-             prompt file's frontmatter.
-agents/      router · pm · pjm · lead · executor · tester · retro
+graph.json   the FULL pipeline as data — nodes, edges, the one human gate,
+             effect policies. Validated by the checks: acyclic, every agent
+             node a leaf, exactly one human-approval node, and every policy
+             matching the prompt file's frontmatter. A node may carry
+             `prompt` when its prompt file is shared (lead runs twice:
+             options, review).
+agents/      router · pm · pjm · lead · executor · qa
              solo-executor · init · evaluation
-hooks/       gate.sh · retry-guard.sh · subagent-gate.sh · ledger.sh
-             reap.sh · run-state.sh · metrics.sh · init-scaffold.sh
+hooks/       gate.sh · plan-gate.sh · retry-guard.sh · subagent-gate.sh
+             ledger.sh · reap.sh · run-state.sh · metrics.sh
+             init-scaffold.sh
 lib/         atomic.sh   shared write primitives (atomic replace, lock)
 benchmarks/  run.sh + tester/{fixtures,ground-truth} + baselines/
              does a prompt diff help? — with a number, not an opinion
 skills/      guardrails/   engineering rules every node obeys
              context-loading/   the map-first rule
-templates/   brief · task-spec · change-summary · test-report
-             report · lessons · config · context-map · metrics.json
+templates/   plan (md+json) · scope · task-spec · change-summary
+             test-cases · test-report · report · summary · config
+             context-map · metrics.json
 runs/        legacy pre-2026-08-18 run state. Current runs live in the
              project: .team-irfan/runs/<yyyymmdd-slug>/ (gitignored), with
              .team-irfan/runs/LEDGER.md — one line per run, latest last —
@@ -484,9 +495,10 @@ docs/        workflow.md   the visual walkthrough
 CHANGELOG.md what changed in each version of the workflow
 ```
 
-A run directory holds `brief.md`, `tasks.md`, `task-<id>.md`,
-`change-summary-<id>.md`, `test-report-<id>.md`, `retries.json`, `run-state.json`,
-`ledger.log`, `ledger.json`, `report.md`, `metrics.json`, `lessons.md`.
+A run directory holds `scope.md`, `options.md`, `plan.md`, `plan.json`,
+`task-<id>.md`, `test-cases.md`, `change-summary-<id>.md`,
+`test-report-<id>.md`, `retries.json`, `blocked.log`, `run-state.json`,
+`ledger.log`, `ledger.json`, `report.md`, `metrics.json`.
 
 ### Node contracts
 
@@ -513,7 +525,7 @@ bash benchmarks/run.sh --score off-by-one r.md   # score against ground truth
 bash benchmarks/run.sh --save-baseline           # commit the new numbers
 ```
 
-Three cases for the Tester: a seeded off-by-one under a green suite, a suite that
+Three cases for QA: a seeded off-by-one under a green suite, a suite that
 asserts on a mock and never on an outcome, and a **clean** one that must produce
 zero findings. That third one is the point — an agent that flags everything is
 not a careful reviewer, and without a false-positive case nothing measures the
@@ -529,7 +541,11 @@ bash tests/run-checks.sh        # 174 deterministic checks, zero agents
 ```
 
 Covers: stub rejection with `file:line` · clean-fixture pass · typecheck failure
-· unit-test failure · retry escalation on the 3rd attempt · per-task-id counters
+· unit-test failure · retry escalation on the 3rd attempt, writing `BLOCKED` to
+`blocked.log` · plan-gate field-by-field (a valid plan passes, every missing or
+malformed field fails by name, run_cap arithmetic verified) · the one-human-gate
+invariant · `ledger.sh cap` reading run_cap with a 60 fallback · assertion-free
+test-case rejection in `test-cases.md` · per-task-id counters
 · template field headings · agent contracts (budget, model, forbidden block,
 leaf clause, timeout/attempts/effect policy) · init scaffold command detection ·
 context-map headings and the 80-line cap · staleness detection in **both**
@@ -537,7 +553,7 @@ directions · metrics schema with derived fields · that `Agent(` appears in no
 agent file except the orchestrator's · the ledger outranking any passed
 tool-call number, including under 20 concurrent writers · crash reaping that
 never deletes a branch · resume from `run-state.json` alone · `graph.json`
-acyclic and agreeing with the prompt files · quality fields derived from gate
+acyclic, exactly one human gate, and agreeing with the prompt files · quality fields derived from gate
 stages · route outcome validated against its enum · 10 concurrent retry-guard
 writers losing no keys · mutation smoke catching a vacuous test and
 false-positiving on none · the benchmark scorer discriminating in both
@@ -555,6 +571,13 @@ with `vitest` (never jest) — the gate degrades gracefully elsewhere but the
 guardrails are written for that stack.
 
 ## Status
+
+**v3.0.0 — the 7-step FULL harness.** Human gates went from three to one: the
+plan approval, fed by a deterministic `plan-gate.sh` and priced by the plan's
+own `run_cap`. QA writes its cases blind, from the approved plan only; Lead's
+evidence review is the machine ship gate; the summary replaces the retro. The
+triage tiers and every trust mechanism from v2.2–v2.4 (ledger, retry lock,
+derived metrics, run-state resume) are unchanged.
 
 **v2.2.0.** One end-to-end FULL run has been exercised — a five-folder backend
 feature. It shipped, and it cost 150 tool calls against a 60-call design budget

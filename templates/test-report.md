@@ -2,7 +2,7 @@
 
 run: <yyyymmdd-slug>
 attempt: <1 | 2 | 3>
-tester: tester
+qa: qa
 verdict: **PASS** | **FAIL**
 
 ## Cases
@@ -53,4 +53,4 @@ is a lie if a path was skipped.>
 <paste bash ~/.claude/team-graph/hooks/retry-guard.sh <run> <task-id> output>
 ```
 
-**Verdict:** PASS — merge · FAIL — return to executor <n> · ESCALATE — Lead
+**Verdict:** PASS — merge · FAIL — return to executor <n> · ESCALATE — run stops, verdict BLOCKED

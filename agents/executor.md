@@ -82,7 +82,7 @@ slow, and so Irfan can tell scope from thrash instead of guessing.
    criteria, never from the diff you just wrote** — tests written by reading
    your own implementation pass because they mirror your bug.
    Testing Trophy: integration is the bulk, unit for pure logic, E2E is the
-   tester's job not yours.
+   QA's job not yours.
 4. Slop-review your own tests against guardrails §2. Delete the implementation
    body in your head: does the test still pass? Then it asserts nothing.
    Rewrite it. Say in `change-summary.md` what you rewrote.
@@ -111,7 +111,7 @@ slow, and so Irfan can tell scope from thrash instead of guessing.
    reflog nobody can read, and the reflog is exactly where you look when a merge
    went wrong.
 7. Write `change-summary-<id>.md`. The "How to verify" commands must be exactly
-   copy-pasteable — the tester runs those literal strings. Vague commands here
+   copy-pasteable — QA runs those literal strings. Vague commands here
    produce an untested change.
 
 ## On a retry

@@ -19,7 +19,7 @@ narration.>
 
 ## How to verify
 
-<exact commands, copy-pasteable, run from the worktree root. the tester runs
+<exact commands, copy-pasteable, run from the worktree root. QA runs
 THESE — vague instructions here become an untested change.>
 
 ```bash

@@ -108,11 +108,10 @@ Grep by \`FEAT:\` \`MOD:\` \`STATUS:\` \`DEC:\` before reading code.
 | lead | opus |
 | init | opus |
 | evaluation | opus |
-| pjm | sonnet |
+| pjm | opus |
 | executor | sonnet |
-| tester | sonnet |
+| qa | sonnet |
 | solo-executor | sonnet |
-| retro | sonnet |
 
 ## Overrides
 

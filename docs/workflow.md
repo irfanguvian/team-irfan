@@ -4,7 +4,7 @@ A visual walkthrough of the graph: how a task is triaged, who runs, where state
 lives, and where you are asked to decide.
 
 Every diagram below renders on GitHub. If you are reading this in a terminal,
-the tables and the ASCII pipeline in the [README](../README.md#the-full-pipeline)
+the tables and the ASCII pipeline in the [README](../README.md#the-full-pipeline--7-steps-one-human-gate)
 carry the same information.
 
 ---
@@ -45,60 +45,65 @@ every run still looks successful.
 
 ---
 
-## 2. The FULL pipeline
+## 2. The FULL pipeline — 7 steps, one human gate
 
 Topology is a **star, not a chain**. The orchestrator runs in the main thread and
 is the only context with a channel to you. Every other node is a leaf: one
 artifact in, one artifact out, spawns nothing.
 
-That is not a style choice. This pipeline has three hard human gates, and a
-subagent cannot stop and ask — a gate held by a leaf silently degrades into an
-assumption with a checkbox.
+That is not a style choice. This pipeline has exactly ONE hard human gate — the
+plan approval — and a subagent cannot stop and ask; a gate held by a leaf
+silently degrades into an assumption with a checkbox.
 
 ```mermaid
 flowchart TD
     subgraph ORCH["ORCHESTRATOR · main thread"]
         direction TB
-        S1["1 · open run<br/>goal branch, .tg-active, baseline gate"]
-        S2["2 · PM"]
-        G1{{"⏸ YOU ANSWER<br/>open questions"}}
-        S3["3 · PjM"]
-        G2{{"⏸ YOU APPROVE SCOPE<br/>silence is not approval"}}
-        S3B["3b · context maps<br/>init per unmapped folder"]
-        S4["4 · worktrees<br/>one per task, never shared"]
-        S5["5 · executors ×N<br/>independent ones concurrent"]
-        S6["6 · tester per task"]
-        S7["7 · merge<br/>one commit per task"]
-        S8["8 · lead reviews merged diff"]
-        G3{{"⏸ YOU SIGN OFF<br/>breaking change = blocker"}}
-        S9["9 · ship block + metrics + retro"]
+        S0["open run<br/>goal branch, .tg-active, baseline gate"]
+        S1A["1 · PM — scope"]
+        S1B["1 · Lead — 1–3 options"]
+        S1C["1 · PjM — plan.md + plan.json<br/>run_cap = min(round(calls×1.3), 60)"]
+        PG["plan-gate.sh<br/><i>deterministic, output pasted first</i>"]
+        G1{{"⏸ YOU APPROVE THE PLAN<br/>the only gate · silence is not approval"}}
+        S2A["2 · worktrees + executors ×N<br/>parallel only where independent: yes"]
+        S2B["2 · QA — test cases from plan.json<br/><b>blind to every diff and worktree</b>"]
+        S3["3 · QA runs per finished task<br/>PASS/FAIL with pasted evidence"]
+        S4["4 · fix loop — same executor, same worktree<br/>max 2 retries, 3rd ⇒ BLOCKED, run stops"]
+        S5["5 · merge (one commit per task)<br/>then Lead review — machine gate<br/>verdict PASS | BLOCKED"]
+        S6["6 · summary — printed + handoffs/<br/>lessons ≤3 lines replace the retro"]
+        S7["7 · end — nothing else runs"]
     end
 
-    S1 --> S2 --> G1 --> S3 --> G2 --> S3B --> S4 --> S5 --> S6 --> S7 --> S8 --> G3 --> S9
+    S0 --> S1A --> S1B --> S1C --> PG --> G1
+    G1 --> S2A --> S3
+    G1 --> S2B --> S3
+    S3 --> S4 --> S5 --> S6 --> S7
 
-    S2 -.-> A1["brief.md"]
-    S3 -.-> A2["tasks.md<br/>task-&lt;id&gt;.md"]
-    S3B -.-> A3[".team-irfan/context/&lt;slug&gt;.md"]
-    S5 -.-> A4["change-summary-&lt;id&gt;.md<br/>+ GATE PASS"]
-    S6 -.-> A5["test-report-&lt;id&gt;.md"]
-    S7 -.-> A6["docs/REGISTRY.md entry"]
-    S8 -.-> A7["report.md"]
-    S9 -.-> A8["docs/handoff/&lt;date&gt;-&lt;slug&gt;.md<br/>metrics.json · lessons.md"]
+    S1A -.-> A1["scope.md"]
+    S1B -.-> A2["options.md"]
+    S1C -.-> A3["plan.md · plan.json<br/>task-&lt;id&gt;.md"]
+    S2A -.-> A4["change-summary-&lt;id&gt;.md<br/>+ GATE PASS"]
+    S2B -.-> A5["test-cases.md"]
+    S3 -.-> A6["test-report-&lt;id&gt;.md"]
+    S5 -.-> A7["report.md · docs/REGISTRY.md entry"]
+    S6 -.-> A8[".team-irfan/handoffs/&lt;date&gt;-&lt;slug&gt;.md<br/>metrics.json"]
 
     style G1 fill:#744210,color:#fff
-    style G2 fill:#744210,color:#fff
-    style G3 fill:#744210,color:#fff
+    style PG fill:#1a365d,color:#fff
+    style S4 fill:#742a2a,color:#fff
+    style S5 fill:#22543d,color:#fff
 ```
 
 ### Who owns what
 
 | | orchestrator | leaf nodes |
 |---|---|---|
-| talks to you | ✅ every gate | ❌ no channel exists |
+| talks to you | ✅ the plan gate | ❌ no channel exists |
 | git operations | ✅ branch, worktree, merge, commit | ❌ except commits inside their own worktree |
 | spawns agents | ✅ the only one | ❌ never |
-| budget ledger | ✅ owns it | reports its own usage |
-| decides scope | ❌ asks you | PjM proposes, you approve |
+| budget ledger | ✅ reads it (hook writes it) | counted by the hook |
+| decides scope | ❌ asks you | PjM proposes, plan-gate checks, you approve |
+| ships | ❌ | Lead's review verdict is the ship gate — PASS or BLOCKED |
 
 ---
 
@@ -110,11 +115,11 @@ from disk. This is what makes the star topology survivable.
 ```mermaid
 flowchart LR
     subgraph RUN["runs/&lt;yyyymmdd-slug&gt;/ · one run"]
-        B["brief.md<br/><i>business rules + sources</i>"]
-        TK["tasks.md · task-&lt;id&gt;.md<br/><i>the contract per executor</i>"]
+        B["scope.md · options.md<br/>plan.md · plan.json<br/><i>the approved contract</i>"]
+        TK["task-&lt;id&gt;.md · test-cases.md<br/><i>the contract per executor, cases from the plan</i>"]
         CS["change-summary-&lt;id&gt;.md<br/><i>what changed + gate output</i>"]
         TR["test-report-&lt;id&gt;.md<br/><i>PASS / FAIL / ESCALATE</i>"]
-        RP["report.md · lessons.md"]
+        RP["report.md<br/><i>Lead review — PASS | BLOCKED</i>"]
         MT["metrics.json<br/><i>the only source of counts</i>"]
     end
 
@@ -131,7 +136,7 @@ flowchart LR
     MT -.->|"/team-irfan-evaluation"| EV["prompt diffs<br/><i>one at a time, your y</i>"]
 ```
 
-`metrics.json` is command-written and structured. `report.md` and `lessons.md`
+`metrics.json` is command-written and structured. `report.md` and the summary
 are prose written by nodes. **The evaluation node takes counts only from
 `metrics.json`** — a number that came from a sentence is not a number.
 
@@ -173,24 +178,25 @@ Reading outside the in-scope folders is a forbidden action. The escape hatch is
 ```mermaid
 stateDiagram-v2
     [*] --> Attempt1
-    Attempt1 --> Merged: tester PASS
+    Attempt1 --> Merged: QA PASS
     Attempt1 --> Attempt2: FAIL + BUG block
-    Attempt2 --> Merged: tester PASS
+    Attempt2 --> Merged: QA PASS
     Attempt2 --> Escalate: FAIL again
-    Escalate --> [*]: orchestrator hands it to you<br/>re-scope or drop
+    Escalate --> [*]: run STOPS · BLOCKED written to blocked.log<br/>failing cases + evidence into the summary
     Merged --> [*]
 
     note right of Escalate
         Attempt 3 does not exist.
-        Two retries on one root cause
-        means the failure block was
-        not actionable — that is
-        recorded, not retried.
+        retry-guard.sh writes the
+        BLOCKED verdict itself — a
+        killed run still shows why
+        it stopped. No "continue?"
+        loop, no silent retries.
     end note
 ```
 
-The same bound applies to the Lead's review: **max 2 rounds**, then it writes the
-handoff and stops. That cap wins over any "keep iterating" instruction.
+The same bound applies to Lead's review: **max 2 rounds**, then verdict BLOCKED
+and the run stops. That cap wins over any "keep iterating" instruction.
 
 The retry counter is a hook (`hooks/retry-guard.sh`), not a prompt — a node
 cannot talk its way past it.
@@ -199,22 +205,19 @@ cannot talk its way past it.
 
 ## 6. The budget model
 
-Tool calls, not tokens, not minutes. The orchestrator keeps the ledger.
+Tool calls, not tokens, not minutes. The hook keeps the ledger; the
+orchestrator reads it.
 
-| tasks | projected calls | verdict |
-|---|---|---|
-| 1 | ~47 | fits under the 60 cap |
-| 2 | ~74 | over — PjM says so in the SCOPE block |
-| 3+ | ~100+ | mis-scoped, or you raise the cap. Your call, not the graph's |
+- **Until the plan is approved:** the static cap, 60.
+- **From approval:** the plan's own `run_cap = min(round(chosen option's
+  expected_calls × 1.3), 60)` — computed by PjM, verified by `plan-gate.sh`,
+  read by `ledger.sh cap <run>` (fallback 60 when plan.json is absent).
 
-Projection is roughly `20 + 27 × tasks`. Each task costs a worktree, an
-executor, a tester and a merge — so **more tasks is more fixed overhead, not more
-parallelism**. Splitting is for work that genuinely cannot share a file, never
-for work that merely can be described in more sentences.
-
-At 60, the orchestrator stops and writes a partial report rather than overrunning
-silently. Per-node budgets are ceilings, not allowances; they deliberately do not
-sum to 60.
+The projection is in the plan itself — each option carries `expected_calls` —
+so the cap is set with the number visible at the gate, not discovered at call
+150. Before EVERY spawn: `ledger.sh read` vs `ledger.sh cap`; at or over, the
+run stops with a partial summary. The cap moves only on an explicit number
+from you (`cap-raised:<n>`).
 
 **Wall clock is measured, not capped.** Executors stamp start and end and report
 elapsed minutes; over 15 they must say why. There is no hard abort — an agent
@@ -227,20 +230,20 @@ enforce a timeout is theatre.
 
 ```mermaid
 flowchart LR
-    N["each node returns"] --> P["[3/10] pjm done · 5 tasks · budget 12/60"]
+    N["each node returns"] --> P["[3/7] pjm done · 2 tasks · budget 12/39"]
     P --> N
     N --> FIN["run ends"]
-    FIN --> SB["ship block · chat + docs/handoff/"]
-    SB --> D["What landed · How to run · How to test<br/>Proof (pasted gate output) · Not done · Verdict"]
+    FIN --> SB["summary · chat + .team-irfan/handoffs/"]
+    SB --> D["what the team did · diff --stat (pasted)<br/>test cases pass/fail · how to test (paste-able)<br/>breaking changes · lessons ≤3 lines · verdict"]
 
     style SB fill:#22543d,color:#fff
 ```
 
-One progress line per node, one ship block at the end. The ship block's test
-command is the literal string you can paste, and **Proof** is pasted `gate.sh`
-output, never a summary of it. A run that ends with commits appearing and nothing
-said is a run you have to audit out of git — which costs you more than the run
-saved.
+Two moments of contact: the plan (printed in full, then one approval question
+with no plan content) and the summary at the end. One progress line per node in
+between. The summary's test commands are literal paste-able strings, and the
+diff --stat is pasted, never summarised. After the summary the session ends —
+step 7 is END, nothing else runs.
 
 ---
 
@@ -253,17 +256,18 @@ deterministic check.
 flowchart TB
     subgraph RIGID["Rigid · hooks, zero LLM"]
         R1["typecheck · unit tests · coverage diff"]
-        R2["stub-test detection with file:line"]
-        R3["retry limit · escalation"]
+        R2["stub-test detection with file:line<br/>assertion-free test-case scan"]
+        R3["plan-gate.sh schema + run_cap arithmetic"]
+        R3b["retry limit · BLOCKED on the 3rd attempt"]
         R4["worktree isolation"]
         R5["package manager + command detection"]
     end
     subgraph PROB["Probabilistic · prompts"]
         P1["problem solving"]
-        P2["test-case design"]
+        P2["option generation · test-case design"]
         P3["convention extraction"]
         P4["documentation"]
-        P5["retro feedback"]
+        P5["lessons in the summary"]
     end
 
     style RIGID fill:#1a365d,color:#fff

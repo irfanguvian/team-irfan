@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# team-graph retry counter. Zero LLM. Called by the Tester on every FAIL.
+# team-graph retry counter. Zero LLM. Called by QA on every FAIL.
 #
 #   usage: retry-guard.sh <run-dir> <task-id>
 #
@@ -11,7 +11,7 @@
 # State lives in <run-dir>/retries.json, keyed by task id. The agent holds no
 # counter of its own; kill it mid-run and the count survives.
 #
-# Concurrent testers bump different task ids into the SAME file, so the atomic
+# Concurrent QA runs bump different task ids into the SAME file, so the atomic
 # rename below is not enough on its own: both would read the same state, both
 # would write a correct file, and one task's count would vanish. The lock is
 # what makes the count survive a parallel run, not just a kill.

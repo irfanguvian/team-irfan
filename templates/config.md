@@ -69,9 +69,8 @@ back to the default.
 | lead | <opus> |
 | pjm | <sonnet> |
 | executor | <sonnet> |
-| tester | <sonnet> |
+| qa | <sonnet> |
 | solo-executor | <sonnet> |
-| retro | <sonnet> |
 
 ## Overrides
 

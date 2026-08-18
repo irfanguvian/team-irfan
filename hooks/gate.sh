@@ -256,7 +256,7 @@ fi
 # ------------------------------------------------------- 6. mutation smoke
 
 # Opt-in (TG_MUTATE=1) because it re-runs the suite once per source file. The
-# Tester runs it; executors do not.
+# QA runs it; executors do not.
 #
 # The stub scan above is syntactic — it catches a test that LOOKS empty. This
 # catches the one that looks fine and asserts nothing real: delete the
