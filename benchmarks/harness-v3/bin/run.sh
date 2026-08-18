@@ -19,6 +19,10 @@ BENCH_ROOT="${BENCH_ROOT:-$HOME/team-irfan-bench}"
 WT_ROOT="${WT_ROOT:-$HOME/team-irfan-bench-wt}"
 MAX_SEC="${MAX_SEC:-2700}"      # 45 min hard stop, per the intervention policy
 MAX_TURNS="${MAX_TURNS:-150}"
+# Pinned explicitly: arm A has an empty settings.json and would otherwise take the
+# CLI default, while arms B and C inherit the operator's "model": "opus". Same
+# model in every arm is the whole premise.
+MODEL="${BENCH_MODEL:-claude-opus-5}"
 DRY=0
 
 # Fastest expected first: a one-liner, then a localised fix, then a feature,
@@ -48,15 +52,18 @@ run_cell() {
   local wt="$WT_ROOT/$task-$arm-$round"
   local out="$H/runs/$task/$arm/$round"
   local prompt; prompt="$(cat "$H/tasks/$task/PROMPT.md")"
-  local -a flags=(-p --output-format json --permission-mode bypassPermissions --max-turns "$MAX_TURNS")
+  local -a flags=(-p --output-format json --permission-mode bypassPermissions --max-turns "$MAX_TURNS" --model "$MODEL")
 
   case "$arm" in
-    bare) flags+=(--strict-mcp-config --mcp-config '{"mcpServers":{}}') ;;
+    # --mcp-config is variadic: it swallows every following argument, so it must
+    # never be the last flag, and the prompt goes in on stdin rather than as a
+    # positional (which it would eat).
+    bare) flags+=(--mcp-config "$H/configs/bare/mcp-empty.json" --strict-mcp-config) ;;
     team) prompt="/team-irfan $prompt" ;;
   esac
 
   if [ "$DRY" = 1 ]; then
-    echo "[$task/$arm/$round] CLAUDE_CONFIG_DIR=$H/configs/$arm claude ${flags[*]} <prompt>"
+    echo "[$task/$arm/$round] CLAUDE_CONFIG_DIR=$H/configs/$arm claude ${flags[*]} <<< \"$prompt\""
     return 0
   fi
 
@@ -72,7 +79,7 @@ run_cell() {
     TEAM_IRFAN_AUTO_APPROVE=1 \
     DATABASE_URL="file:./bench-$arm-$round.db" \
     API_KEY=bench-key \
-      claude "${flags[@]}" "$prompt"
+      claude "${flags[@]}" <<< "$prompt"
   ) > "$out/result.json" 2> "$out/stderr.log" &
   local pid=$!
   ( sleep "$MAX_SEC"; kill -TERM "$pid" 2>/dev/null ) & local killer=$!

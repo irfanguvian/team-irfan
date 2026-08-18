@@ -33,16 +33,24 @@ score_cell() {
   # 1. what changed --------------------------------------------------------
   rm -rf "$wt/test/acceptance"      # a re-score must not grade last score's copy
   git -C "$wt" add -A >/dev/null 2>&1
-  git -C "$wt" diff --cached > "$out/diff.txt"
-  git -C "$wt" diff --cached --stat | tail -1 > "$out/diffstat.txt"
-  local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat \
+  # Agent-runtime bookkeeping is excluded everywhere it would distort a number:
+  # OMC writes hundreds of lines of session state into the working directory, and
+  # counting it would make the tooling-heavy arms look like they rewrote the repo.
+  local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json')
+  git -C "$wt" diff --cached -- . "${NOISE[@]}" > "$out/diff.txt"
+  git -C "$wt" diff --cached --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
+  local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat -- . "${NOISE[@]}" \
     | awk '{a+=$1; d+=$2} END {print (a+d)+0}')
-  local files; files=$(git -C "$wt" diff --cached --name-only)
+  local files; files=$(git -C "$wt" diff --cached --name-only -- . "${NOISE[@]}")
 
   # 2. out-of-scope files --------------------------------------------------
+  # Agent-runtime bookkeeping is not role bleed. OMC and Claude Code write
+  # session state into the working directory; counting it as an out-of-scope
+  # edit would penalise arms B and C for their tooling's own filing cabinet.
   local oos=0 oos_list=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue
+    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*) continue ;; esac
     local hit=0
     while IFS= read -r pat; do
       [ -z "$pat" ] && continue

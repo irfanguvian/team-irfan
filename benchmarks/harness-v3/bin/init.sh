@@ -19,10 +19,19 @@ build_configs() {
   rm -rf "$H/configs"
   mkdir -p "$H/configs"/{bare,omc,team}
 
+  # Auth and onboarding state live in ~/.claude.json, which Claude Code reads from
+  # inside CLAUDE_CONFIG_DIR. Without it every arm answers "Not logged in".
+  # `projects` (per-directory history and trust) and `mcpServers` are dropped: the
+  # worktrees are new paths anyway, and no arm should inherit another run's state.
+  for arm in bare omc team; do
+    jq 'del(.projects, .mcpServers)' "$HOME/.claude.json" > "$H/configs/$arm/.claude.json"
+  done
+
   # Arm A — bare. Empty memory, no plugins, no hooks. MCP is switched off at the
   # command line in run.sh, because MCP config does not live in the config dir.
   : > "$H/configs/bare/CLAUDE.md"
   printf '{}\n' > "$H/configs/bare/settings.json"
+  printf '{"mcpServers":{}}\n' > "$H/configs/bare/mcp-empty.json"
 
   # Arms B and C share the operator's real setup: same settings, same plugins,
   # same FUNDAMENTALS. They differ in exactly two things — whether CLAUDE.md

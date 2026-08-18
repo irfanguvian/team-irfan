@@ -93,6 +93,12 @@ all three arms. Exactly two things differ between them:
 B and C therefore isolate one variable: the team-graph pipeline. A is the only
 truly independent baseline — weight it accordingly.
 
+The model is pinned with `--model` on every arm (`BENCH_MODEL`, default
+`claude-opus-5`). Arm A's settings are empty and would otherwise take the CLI
+default while B and C inherit the operator's `"model": "opus"`. Arm C still gets
+its own per-agent model matrix underneath — that is part of the harness, and cost
+is compared in dollars, so the mix is fairly priced.
+
 Every run gets its own git worktree, its own SQLite file, and its own cloned
 `node_modules`, so nothing leaks between rounds. Session transcripts land under
 each arm's own config dir, so one arm cannot read another's.
