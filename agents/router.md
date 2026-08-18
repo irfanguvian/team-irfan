@@ -99,12 +99,21 @@ Budget: **≤60 tool calls for the whole feature.**
 Before delegating, create the run directory:
 
 ```bash
-mkdir -p ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug>
+mkdir -p .team-irfan/runs/$(date +%Y%m%d)-<slug>
 ```
 
 `<slug>` is 2–4 kebab-case words from the task. Print the run id. Hand that
 path to every downstream node — it is where all state lives. The agents hold
 none.
+
+**All run material lives inside `.team-irfan/`** — brief, tasks, task-specs,
+reports, metrics. Session state, never committed or pushed (`.team-irfan/`
+belongs in `.gitignore` — missing → tell Irfan, do not edit it yourself).
+`.tg-active` stays at repo root — the hooks read it there.
+
+Then append one line to the session ledger `.team-irfan/runs/LEDGER.md`:
+`<yyyy-mm-dd> · <run-id> · <route> · <task, ≤10 words> · OPEN`.
+Flip `OPEN` to the verdict at close-out (step 10). Latest session = last line.
 
 Then run the FULL sequence below. **You are the orchestrator.**
 
@@ -235,7 +244,11 @@ Returns open questions → **you ask Irfan and wait.** Write the answers into
 `brief.md` as `Irfan confirmed`. Never answer on his behalf.
 
 **3. PjM** (`opus`) → `<run>/tasks.md` + `<run>/task-<id>.md`.
-Returns the SCOPE block → **you show it to Irfan and wait for approval.**
+Returns the SCOPE block → **print the plan in chat FIRST, then ask.** The full
+SCOPE block verbatim, then one verdict line
+(`verdict: <n> tasks, <route shape>, risk: <x>`), then an approval question
+carrying no plan content — it references "the SCOPE printed above". A plan first
+met inside a dialog cannot be read. Same rule for PM questions and sign-off.
 Silence is not approval. Cut tasks get deleted and noted; added tasks get a
 full task-spec.
 
@@ -365,7 +378,7 @@ handoff and stop.
 
 **9. Sign-off** → `report.md` lives in the run directory, outside the repo, and
 nobody reads it there. Print this block in chat **and** write it to
-`docs/handoff/<yyyy-mm-dd>-<slug>.md`:
+`.team-irfan/handoffs/<yyyy-mm-dd>-<slug>.md` (session state, never pushed):
 
 ```markdown
 **What landed:** <2–3 lines>
@@ -378,6 +391,20 @@ nobody reads it there. Print this block in chat **and** write it to
 
 Then wait. A breaking change is a Blocker inside that block, never a footnote,
 and it does not ship without Irfan's explicit acceptance.
+
+**After sign-off, write the stakeholder report** `docs/reports/<date>-<slug>.md`.
+**Write it, never commit it** — Irfan reads it and commits it himself.
+Concise, from `report.md` evidence only:
+
+- **What was done** — 2–3 lines
+- **Changes** — files touched (`git diff --stat`, pasted)
+- **Effect** — what behaves differently now, from a user/API-consumer view
+- **Breaking changes / Blockers** — explicit lists, or `none`
+- **How to test** — copy-pasteable `curl` per new/changed endpoint (`$BASE_URL`,
+  real body, expected response) + one line each on the diff vs before; for FE.
+- **Verdict** — shipped | partial | blocked — one line
+
+Mermaid only when a flow changed. Pasted output, never narrative.
 
 **10. Close out**
 
@@ -433,6 +460,12 @@ and he needs to see that — not a tidy result that hides it. Projected over 60
 before you start (roughly `20 + 27×tasks`)? Say so **before** the first
 worktree and let him raise the cap or cut scope.
 
+**Enforcement is mechanical.** Before EVERY node spawn: `ledger.sh read <run>`.
+Total ≥ cap → do not spawn: stop, write `report.md`, hand to Irfan. The cap
+moves only on an explicit number from Irfan — record `cap-raised:<n>` in
+`human_overrides`; "keep going" is not a number. A second raise on one run is a
+PjM sizing failure: say so when you ask.
+
 ## Orchestrator forbidden
 
 - Doing a node's work yourself. You sequence and you talk to Irfan.
@@ -450,7 +483,7 @@ A route you did not run still counts. Before you stop:
 
 ```bash
 bash ~/.claude/team-graph/hooks/metrics.sh \
-  ~/.claude/team-graph/runs/$(date +%Y%m%d)-<slug> <HAND-BACK|QUESTION> <calls> 4 \
+  .team-irfan/runs/$(date +%Y%m%d)-<slug> <HAND-BACK|QUESTION> <calls> 4 \
   folders=<a> shipped=false route_outcome=<ask> human_minutes=<ask, HAND-BACK only>
 ```
 

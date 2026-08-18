@@ -200,8 +200,9 @@ and 3 active ones ends up with 3 maps. That's correct, not incomplete.
 
 ### `/team-irfan-evaluation`
 
-On-demand. Reads every `runs/*/metrics.json`, aggregates, and finds where the
-routing rubric is wrong:
+On-demand. Reads every `.team-irfan/runs/*/metrics.json` in the project (plus
+the legacy `~/.claude/team-graph/runs/` pre-2026-08-18), aggregates, and finds
+where the routing rubric is wrong:
 
 - FAST runs that blew their budget → should have been FULL, or HAND-BACK
 - FULL runs that were trivial → the rubric is too timid
@@ -269,8 +270,11 @@ ORCHESTRATOR (main thread)
   │
   ├─ PjM ─────────────────► tasks.md + one task-spec per task
   │    Executor count comes from the breakdown. Backend-only work spawns
-  │    zero frontend agents.
-  │     ⏸ YOU APPROVE SCOPE ⏸   silence is not approval
+  │    zero frontend agents. The SCOPE block draws the execution path —
+  │    parallel lanes, merge points — and names the rejected alternative.
+  │     ⏸ YOU APPROVE SCOPE ⏸   the full plan is printed in chat FIRST;
+  │                             the approval question carries no plan content.
+  │                             Silence is not approval.
   │
   ├─ INIT ×folders ──────► .team-irfan/context/<slug>.md
   │    One map per in-scope folder that lacks one. A leaf cannot spawn init,
@@ -299,10 +303,16 @@ ORCHESTRATOR (main thread)
   │    one two tasks create together. Max 2 review rounds.
   │     ⏸ YOU SIGN OFF ⏸    breaking change = blocker, never a footnote
   │
-  ├─ SHIP BLOCK ──────────► printed, and docs/handoff/<date>-<slug>.md
+  ├─ SHIP BLOCK ──────────► printed, and .team-irfan/handoffs/<date>-<slug>.md
   │    What landed · How to run · How to test · Proof · Not done · Verdict.
   │    "How to test" is the literal paste-able command. "Proof" is pasted
-  │    gate.sh output, never a summary of it.
+  │    gate.sh output, never a summary of it. Session state — never pushed.
+  │
+  ├─ STAKEHOLDER REPORT ──► docs/reports/<date>-<slug>.md — written, NEVER
+  │    committed; you read it and commit it yourself. What was done · changes
+  │    (diff --stat pasted) · effect · breaking changes · blockers · how to
+  │    test with copy-pasteable curl per changed endpoint · verdict. Built
+  │    from pasted command output, not narrative.
   │
   └─ RETRO ───────────────► lessons.md, shown to you.
                             Never edits CLAUDE.md, a skill, or a hook.
@@ -377,6 +387,11 @@ Every agent carries an identical forbidden-actions block:
   count. A number the measured party types is not a measurement, and every
   routing conclusion downstream inherits its error. At 60 the run stops with a
   partial report rather than overrunning silently.
+- **The cap is checked mechanically, before every spawn.** `ledger.sh read`
+  runs before each node; at or over the cap, nothing spawns. The cap moves
+  only when you state a new number in chat (`cap-raised:<n>` in the metrics) —
+  "keep going" is not a number. A second raise on one run is a PjM sizing
+  failure, and the orchestrator says so when it asks.
 - Per-node budgets are **ceilings, not allowances**, and deliberately don't sum
   to 60 — a 2-task feature at every ceiling would spend ~100. Realistic
   projection is roughly `20 + 27×tasks`; over 60, the orchestrator asks you to
@@ -459,7 +474,10 @@ skills/      guardrails/   engineering rules every node obeys
              context-loading/   the map-first rule
 templates/   brief · task-spec · change-summary · test-report
              report · lessons · config · context-map · metrics.json
-runs/        runs/<yyyymmdd-slug>/  — all state for one run (local, gitignored)
+runs/        legacy pre-2026-08-18 run state. Current runs live in the
+             project: .team-irfan/runs/<yyyymmdd-slug>/ (gitignored), with
+             .team-irfan/runs/LEDGER.md — one line per run, latest last —
+             as the session ledger any later session resumes from
 tests/       fixture/ · run-checks.sh · cases.md
 docs/        workflow.md   the visual walkthrough
              evaluations/  what past runs measured, and what changed because of it
@@ -551,9 +569,22 @@ retry count is a locked counter, `gate_caught` and `review_rounds` are derived,
 and the only field a human supplies is the one only a human can answer —
 `route_outcome`. The next FULL run produces numbers worth believing.
 
-So: the sequence is proven to run, and proven to have been over-budget once.
-n=1 — the routing rubric still has no evidence behind it, and the evaluation
-node now **refuses** to tune it from aggregates below five runs. Keep running
+**v2.4 — three runs measured, trust is the theme.** The two msg91 runs
+(2026-08-17) blew the 60-call cap 10× (658 and 590), the lead failed to write
+its report twice, and the scope approval arrived as a dialog with no readable
+plan. The 2026-08-18 evaluation (n=3, direct run review — the aggregate stays
+blocked below n=5) landed seven prompt diffs: plan printed in chat before any
+approval question · a mechanical pre-spawn ledger check on the cap · run state
+moved into the project at `.team-irfan/runs/` with a session `LEDGER.md` ·
+handoffs into `.team-irfan/handoffs/` (never pushed) · an evidence-not-testimony
+lead report with a write-denied fallback · a stakeholder report under
+`docs/reports/` (written, never committed — you commit it) with curl tests per
+changed endpoint · and PjM's SCOPE block drawing the execution path with a
+rejected alternative. Record:
+[`docs/evaluations/2026-08-18-fanible-msg91.md`](docs/evaluations/2026-08-18-fanible-msg91.md).
+
+n=3 — the routing rubric still has thin evidence behind it, and the evaluation
+node **refuses** to tune it from aggregates below five runs. Keep running
 `/team-irfan-evaluation` after runs; direct run review works at any n.
 
 Nested subagent spawning is unverified in this harness; the star topology means

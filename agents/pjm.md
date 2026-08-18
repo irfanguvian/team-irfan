@@ -103,10 +103,23 @@ T1  <name>            backend   files: 2   depends: none
 T2  <name>            backend   files: 3   depends: T1
 T3  <name>            frontend  files: 2   depends: T1
 
+path:
+  lane A: T1 ──> T2        (sequential — T2 depends on T1)
+  lane B:      └─> T3      (parallel with T2 after T1 merges)
+
+route chosen: <one line — the shape and why>
+rejected: <one line — the alternative split considered and why not>
+
 out of scope: <the explicit list, carried from brief.md>
 
 approve?
 ```
+
+The `path:` lanes are the execution picture — what runs in parallel, what
+waits, where the merge points are. Drawing it before approval is what forces
+the thinking to happen at plan time instead of at call 400. One `rejected:`
+line minimum: a plan with no alternative considered is a plan that was not
+planned, only transcribed.
 
 Then wait. No worktree is created, no executor is spawned, nothing is read
 further until Irfan approves. **You cannot approve your own scope.** Silence is

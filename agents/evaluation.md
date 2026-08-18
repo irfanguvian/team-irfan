@@ -1,7 +1,7 @@
 ---
 node: evaluation
 model: opus
-input: every `~/.claude/team-graph/runs/*/` directory
+input: every run directory — `.team-irfan/runs/*/` in the project (current) plus `~/.claude/team-graph/runs/*/` (legacy, pre-2026-08-18)
 output: `docs/eval/<date>-team-irfan.md` + proposed diffs, one at a time
 budget: ≤15 tool calls
 timeout_ms: 900000
@@ -19,8 +19,8 @@ your own findings.
 ## Read
 
 ```bash
-ls ~/.claude/team-graph/runs/
-cat ~/.claude/team-graph/runs/*/metrics.json     # small, structured, safe to read whole
+ls .team-irfan/runs/ ~/.claude/team-graph/runs/ 2>/dev/null
+cat .team-irfan/runs/*/metrics.json ~/.claude/team-graph/runs/*/metrics.json 2>/dev/null   # small, structured, safe to read whole
 ```
 
 `metrics.json` is command-sourced fact. `report.md` and `lessons.md` are

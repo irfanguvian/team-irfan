@@ -5,6 +5,36 @@ project's.
 
 ---
 
+## v2.4.0 — 2026-08-18
+
+Implements all seven diffs of
+[`docs/evaluations/2026-08-18-fanible-msg91.md`](docs/evaluations/2026-08-18-fanible-msg91.md)
+(n=3, direct run review — msg91 runs blew the cap 10×, lead lost its report
+twice, scope approval was unreadable at the gate).
+
+- `agents/router.md` — plan printed in chat before any approval question, at
+  every human gate; the question itself carries no plan content.
+- `agents/router.md` — mechanical cap: `ledger.sh read` before every spawn,
+  ≥cap → stop. Cap moves only on an explicit number (`cap-raised:<n>`).
+- `agents/router.md` — run state moves into the project:
+  `.team-irfan/runs/<id>/` plus a session ledger `.team-irfan/runs/LEDGER.md`
+  (one line per run, verdict flipped at close-out). `.tg-active` stays at repo
+  root — the hooks read it there; hooks were verified path-agnostic.
+- `agents/evaluation.md` — reads `.team-irfan/runs/*/metrics.json`, plus the
+  legacy `~/.claude/team-graph/runs/` for pre-move history.
+- `agents/lead.md` — evidence-not-testimony report (pasted diff --stat, gate
+  line, per-task verdicts, file:line quotes) and a WRITE-DENIED fallback: the
+  full report content returns in the final message for the orchestrator to
+  write.
+- `agents/router.md` — ship block goes to `.team-irfan/handoffs/` (session
+  state, never pushed); a stakeholder report goes to `docs/reports/` —
+  written, never committed, Irfan reviews and commits it himself — with
+  copy-pasteable curl per changed endpoint for FE consumers.
+- `agents/pjm.md` — SCOPE block draws the execution path (parallel lanes,
+  merge points) and names one rejected alternative before approval.
+
+---
+
 ## v2.3.0 — 2026-08-17
 
 Implements the APPROVED LIST (D, F, I) of

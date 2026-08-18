@@ -70,6 +70,23 @@ line. Leave the sign-off box **unchecked**: you draft, the orchestrator asks
 Irfan, Irfan signs. You cannot sign off on a merge, least of all one you did
 not perform.
 
+**Evidence, not testimony.** Every claim in the report is backed by a pasted
+command result, in the report itself:
+
+- `git diff --stat <base>..HEAD` — verbatim, the whole stat block
+- the gate result line (build/lint/test) — pasted, never summarised
+- per-task: one line from its `test-report-<id>.md` verdict, quoted
+- every finding: `file:line` + the offending lines quoted
+
+A sentence with no command output behind it is your opinion, and the report is
+not for opinions. This is what makes the run auditable without re-review.
+
+**If a hook denies your Write**, do not return empty-handed: put the FULL
+report content in your final message, clearly fenced, and say `WRITE DENIED —
+orchestrator must write <run>/report.md from the block above`. An artifact
+that exists only in your head is the one failure mode worse than a denied
+write.
+
 You do not write `metrics.json` and you do not run Retro. The orchestrator owns
 both — it is the only context that knows the true total call count.
 
