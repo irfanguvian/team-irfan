@@ -3,6 +3,7 @@
 #
 #   ledger.sh bump <run-dir> [node]   record one tool call
 #   ledger.sh read <run-dir>          print the total, refresh ledger.json
+#   ledger.sh cap <run-dir>           print the run cap: plan.json run_cap, else 60
 #   ledger.sh hook                    PostToolUse mode — stdin is the hook payload
 #
 # Why this file exists: the tool-call total governs routing, budget enforcement
@@ -24,7 +25,7 @@
 set -uo pipefail
 
 usage() {
-  echo "usage: ledger.sh {bump <run-dir> [node] | read <run-dir> | hook}" >&2
+  echo "usage: ledger.sh {bump <run-dir> [node] | read <run-dir> | cap <run-dir> | hook}" >&2
   exit 2
 }
 
@@ -64,6 +65,27 @@ do_read() {
   ' 2>/dev/null || wc -l < "$log" | tr -d ' '
 }
 
+# ------------------------------------------------------------------ cap
+
+# The pre-spawn check reads the cap from the approved plan, not from a prompt
+# constant. No plan.json (or no valid run_cap in it) → the static FULL cap, 60.
+do_cap() {
+  local run="${1:-}"
+  [ -n "$run" ] || usage
+  local plan="$run/plan.json"
+  if [ -f "$plan" ]; then
+    local cap
+    cap=$(node -e '
+      try {
+        const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).run_cap;
+        if (Number.isFinite(c) && c > 0) console.log(c);
+      } catch {}
+    ' "$plan" 2>/dev/null)
+    if [ -n "$cap" ]; then echo "$cap"; return 0; fi
+  fi
+  echo 60
+}
+
 # ------------------------------------------------------------------ hook
 
 # PostToolUse payloads carry no reliable agent identity. A correct total beats an
@@ -92,6 +114,7 @@ do_hook() {
 case "$MODE" in
   bump) do_bump "${1:-}" "${2:-}" ;;
   read) do_read "${1:-}" ;;
+  cap)  do_cap "${1:-}" ;;
   hook) do_hook ;;
   *)    usage ;;
 esac

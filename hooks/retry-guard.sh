@@ -4,7 +4,9 @@
 #   usage: retry-guard.sh <run-dir> <task-id>
 #
 #   exit 0  →  RETRY <n>/2  — send the failure report back to the SAME executor
-#   exit 1  →  ESCALATE     — stop. Lead takes it, then Irfan.
+#   exit 1  →  ESCALATE     — the run STOPS. verdict BLOCKED is recorded in
+#                             <run-dir>/blocked.log; failing cases + evidence go
+#                             into the summary, then it is handed to Irfan.
 #
 # State lives in <run-dir>/retries.json, keyed by task id. The agent holds no
 # counter of its own; kill it mid-run and the count survives.
@@ -57,8 +59,11 @@ if [ -z "$N" ]; then
 fi
 
 if [ "$N" -gt "$LIMIT" ]; then
-  echo "ESCALATE task=$TASK_ID attempts=$N limit=$LIMIT"
-  echo "refusing to continue — hand the failure to Lead, then to Irfan"
+  # the BLOCKED verdict is a hook-written fact, not an orchestrator promise —
+  # a killed run still shows WHY it stopped.
+  printf 'BLOCKED task=%s attempts=%s\n' "$TASK_ID" "$N" >> "$RUN_DIR/blocked.log"
+  echo "ESCALATE task=$TASK_ID attempts=$N limit=$LIMIT verdict=BLOCKED"
+  echo "refusing to continue — run stops: failing cases + evidence go into the summary, then Irfan"
   exit 1
 fi
 
