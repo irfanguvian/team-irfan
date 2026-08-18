@@ -7,3 +7,5 @@ configs/
 # without the transcripts.
 runs/*/
 runs/results.csv
+
+runs/results-*.csv
