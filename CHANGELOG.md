@@ -5,6 +5,53 @@ project's.
 
 ---
 
+## v3.0.0 — 2026-08-18
+
+The FULL path restructured to a 7-step harness. Triage tiers (HAND-BACK,
+QUESTION, FAST) untouched; star topology, ledger, gate.sh, retry-guard,
+worktree-per-task, run-state resume, and the forbidden-actions block all
+preserved.
+
+**Breaking — the flow itself:**
+
+- **One human gate instead of three.** The plan approval is the only stop.
+  PM's open questions fold into the plan and are answered there; the ship
+  sign-off is replaced by Lead's machine review gate (verdict PASS | BLOCKED,
+  evidence pasted, a breaking change is always BLOCKED).
+- **PjM is the FULL entry node** and the bridge to Irfan: restates the task as
+  a verifiable work list, folds in PM's sourced scope (`scope.md`) and Lead's
+  1–3 options (`options.md`, one recommended), and writes `plan.md` (printed
+  in chat in full before the question) + `plan.json` (machine-readable, with
+  `run_cap = min(round(chosen expected_calls × 1.3), 60)`).
+- **`hooks/plan-gate.sh`** — deterministic, zero LLM: required fields, 1–3
+  options, chosen id exists, numeric expected_calls, run_cap arithmetic,
+  non-empty scope_folders. Named reason on failure; PjM regenerates (max 2,
+  then HAND-BACK). Output pasted before the approval question.
+- **`run_cap` replaces the static 60** once approved: `ledger.sh cap <run>`
+  reads it from plan.json, fallback 60; the pre-spawn check uses it.
+- **QA (tester renamed)** writes test cases from plan.json ONLY, in parallel
+  with the executors, blind to any diff or worktree. Backend: executable curl
+  cases with status+body assertions; frontend: `chrome-devtools-axi` steps or
+  a declared manual checklist — never faked browser output. `gate.sh` now
+  scans `test-cases.md` and fails assertion-free cases.
+- **Fix loop hard-capped as before** (2 retries), but the 3rd failure now
+  writes a hook-owned `BLOCKED` verdict to `<run>/blocked.log` and stops the
+  run — failing cases + evidence go into the summary.
+- **Summary replaces retro + ship block + stakeholder report.**
+  `.team-irfan/handoffs/<date>-<slug>.md` from `templates/summary.md`: one
+  line per node, `diff --stat`, case counts, paste-able test commands,
+  breaking changes, lessons (max 3 lines), a mermaid of what ran, one-line
+  verdict. Printed in chat; the session ends after it.
+- `agents/retro.md` deleted; `templates/brief.md` → `templates/scope.md`;
+  `templates/report.md` is now Lead's evidence review; new
+  `templates/plan.md`, `templates/plan.json`, `templates/test-cases.md`,
+  `templates/summary.md`.
+- `graph.json` v3: acyclic, all-leaf, **exactly one** human-approval node;
+  nodes may carry `prompt` when a prompt file is shared (lead runs twice:
+  options, review). Checks updated: plan-gate field-by-field, one-gate
+  invariant, cap fallback, BLOCKED on 3rd attempt, assertion-free case scan,
+  new template headings.
+
 ## v2.4.0 — 2026-08-18
 
 Implements all seven diffs of
