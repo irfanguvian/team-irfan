@@ -108,16 +108,18 @@ check_fields() {
   for f in "$@"; do grep -qF "$f" "$file" || missing="$missing '$f'"; done
   [ -z "$missing" ] && ok "$1" || bad "$1 missing:$missing"
 }
-check_fields brief.md          '## Problem' '## Business logic' '## Open questions for Irfan' '## Acceptance' '## Out of scope'
-check_fields task-spec.md      '## Goal' '## Files in scope' '## Acceptance criteria' '## Out of scope'
+check_fields scope.md          '## Problem' '## Scope in' '## Scope out' '## Open questions' '## Acceptance'
+check_fields task-spec.md      '## Goal' '## Files in scope' '## Acceptance criteria' '## Out of scope' 'independent:'
 check_fields change-summary.md '## What changed' '## Files' '## How to verify' '## Gate output'
 check_fields test-report.md    'verdict:' '## Cases' '## Evidence' '## Bugs found' '## Not covered'
-check_fields report.md         '**Done:**' '**Fine or not:**' '**Blockers:**' '**Next:**' '**Verdict:**'
-check_fields lessons.md        '## Candidate rules'
+check_fields report.md         'verdict:' '## Backward compatibility' '## Gate' '## Scope' '## Findings' '**Verdict:**'
+check_fields plan.md           '## Goal' '## Work list' '## Scope' '## Options' '## Chosen option' '## Test contract' '## Open questions for Irfan' '## Run cap'
+check_fields test-cases.md     'source: plan.json ONLY' 'expect_status' 'expect_body' 'expect_effect' 'chrome-devtools-axi'
+check_fields summary.md        '## What the team did' '## Changes' '## Test cases' '## How to test' '## Breaking changes' '## Lessons' '## What ran' '**Verdict:**'
 
 # ── 4b. every agent contract declares its budget and forbidden list ──────────
 head2 "4b. agent contracts declare budget + forbidden actions"
-for a in router solo-executor pm pjm lead executor tester retro; do
+for a in router solo-executor pm pjm lead executor qa; do
   f="$TG/agents/$a.md"
   if [ ! -f "$f" ]; then bad "$a.md missing"; continue; fi
   grep -q '^budget:' "$f" && grep -q '^## Forbidden' "$f" \
@@ -374,7 +376,7 @@ grep -q 'git log -1 --format=%s' "$TG/agents/router.md" \
 
 # retry policy lives in two places; they must not drift
 LIMIT=$(grep -E '^LIMIT=' "$TG/hooks/retry-guard.sh" | head -1 | sed 's/^LIMIT=\([0-9]*\).*/\1/')
-for a in executor tester; do
+for a in executor qa; do
   MA=$(grep -E '^max_attempts:' "$TG/agents/$a.md" | awk '{print $2}')
   [ "$MA" = "$((LIMIT+1))" ] \
     && ok "$a max_attempts=$MA matches retry-guard LIMIT=$LIMIT" \
@@ -410,19 +412,21 @@ if node -e '
   for (const n of g.nodes)
     if (n.kind === "agent" && n.leaf !== true) fail("non-leaf agent node: " + n.id);
 
-  // INVARIANT: the three human gates are structural, not prose
+  // INVARIANT: exactly ONE human gate — the plan approval. A second gate is
+  // drift back toward v2; zero means the plan ships itself.
   const gates = g.nodes.filter(n => n.kind === "human-approval");
-  if (gates.length < 3) fail("expected 3 human gates, found " + gates.length);
+  if (gates.length !== 1) fail("expected exactly 1 human gate, found " + gates.length);
   for (const gate of gates)
     if (!gate.prompt) fail("human gate with no prompt: " + gate.id);
 
-  // every agent node has a real prompt file
+  // every agent node has a real prompt file (node.prompt names a shared one)
+  const promptOf = n => n.prompt || n.id;
   for (const n of g.nodes)
-    if (n.kind === "agent" && !fs.existsSync(path.join(TG, "agents", n.id + ".md")))
+    if (n.kind === "agent" && !fs.existsSync(path.join(TG, "agents", promptOf(n) + ".md")))
       fail("no prompt file for node " + n.id);
 
   // and every prompt file is accounted for — a new agent cannot hide from the graph
-  const declared = new Set([...g.nodes.map(n=>n.id), ...(g.standalone||[]).map(n=>n.id)]);
+  const declared = new Set([...g.nodes.map(promptOf), ...g.nodes.map(n=>n.id), ...(g.standalone||[]).map(n=>n.id)]);
   for (const f of fs.readdirSync(path.join(TG, "agents")).filter(f => f.endsWith(".md"))) {
     const id = f.replace(/\.md$/, "");
     if (!declared.has(id)) fail("agents/" + f + " appears in no graph node and no standalone entry");
@@ -431,14 +435,14 @@ if node -e '
   // the graph and the frontmatter must agree on effect_policy
   for (const n of g.nodes) {
     if (n.kind !== "agent") continue;
-    const fm = fs.readFileSync(path.join(TG, "agents", n.id + ".md"), "utf8");
+    const fm = fs.readFileSync(path.join(TG, "agents", promptOf(n) + ".md"), "utf8");
     const m = fm.match(/^effect_policy:\s*(\S+)/m);
-    if (!m) fail(n.id + ".md declares no effect_policy");
+    if (!m) fail(promptOf(n) + ".md declares no effect_policy");
     if (m[1] !== n.effect_policy)
       fail(n.id + ": graph says " + n.effect_policy + ", frontmatter says " + m[1]);
   }
 ' "$TG" 2>"$TMP/gerr"; then
-  ok "graph.json valid: acyclic, all-leaf, 3 gates, files exist, policies agree"
+  ok "graph.json valid: acyclic, all-leaf, exactly 1 human gate, files exist, policies agree"
 else
   bad "graph.json failed validation: $(cat "$TMP/gerr")"
 fi
@@ -577,8 +581,8 @@ rm -f src/cart.ts.mutbak
 OUT=$(TG_SCAN=all bash "$GATE" 2>&1)
 grep -q 'mutation' <<< "$OUT" && bad "mutation ran without TG_MUTATE=1" \
                               || ok "opt-in only, silent by default"
-grep -q 'TG_MUTATE' "$TG/agents/tester.md" \
-  && ok "tester is the node that runs it" || bad "nothing ever sets TG_MUTATE"
+grep -q 'TG_MUTATE' "$TG/agents/qa.md" \
+  && ok "qa is the node that runs it" || bad "nothing ever sets TG_MUTATE"
 
 # ── 20. tester benchmark harness is wired and regression-guarded ─────────────
 head2 "20. tester benchmark harness is wired and regression-guarded"
@@ -754,6 +758,164 @@ grep -q 'FAIL  ledger hook' <<< "$OUT" \
   && ok "FAIL line names the ledger hook" || bad "failure does not name the ledger hook"
 grep -q 'DOCTOR FAIL' <<< "$OUT" \
   && ok "verdict is DOCTOR FAIL" || bad "DOCTOR FAIL verdict missing"
+
+# ── 25. plan-gate.sh: valid plan passes, every broken field named ────────────
+head2 "25. plan-gate.sh: valid plan passes, every broken field fails by name"
+PG="$TG/hooks/plan-gate.sh"
+PRUN="$TMP/plan-run"; mkdir -p "$PRUN"
+
+good_plan() {
+  cat > "$PRUN/plan.json" <<'JSON'
+{
+  "goal": "block/unblock endpoint exists",
+  "scope_folders": ["src/app/users"],
+  "options": [
+    { "id": "A", "approach": "extend service", "files": ["src/app/users/u.ts"], "risk": "low", "expected_calls": 30 },
+    { "id": "B", "approach": "new module", "files": ["src/app/block/b.ts"], "risk": "medium", "expected_calls": 45 }
+  ],
+  "chosen_option_id": "A",
+  "test_contract": { "type": "backend-e2e", "cases_source": "plan" },
+  "run_cap": 39
+}
+JSON
+}
+
+good_plan
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'PLAN GATE PASS' <<< "$OUT" \
+  && ok "valid plan → PLAN GATE PASS, exit 0" || bad "valid plan rejected (rc=$RC): $OUT"
+
+# missing plan.json entirely
+rm -f "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'plan.json missing' <<< "$OUT" \
+  && ok "missing plan.json → named failure" || bad "missing file not caught"
+
+# each required field, removed one at a time, must fail by name
+for field in goal scope_folders options chosen_option_id test_contract run_cap; do
+  good_plan
+  node -e '
+    const fs=require("fs"); const f=process.argv[1];
+    const p=JSON.parse(fs.readFileSync(f,"utf8"));
+    delete p[process.argv[2]];
+    fs.writeFileSync(f, JSON.stringify(p));
+  ' "$PRUN/plan.json" "$field"
+  OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+  [ "$RC" -eq 1 ] && grep -q "missing field: $field" <<< "$OUT" \
+    && ok "missing $field → fails, named" || bad "missing $field not caught: $OUT"
+done
+
+# 4 options
+good_plan
+node -e '
+  const fs=require("fs"); const f=process.argv[1];
+  const p=JSON.parse(fs.readFileSync(f,"utf8"));
+  p.options.push({id:"C",approach:"x",files:["a"],risk:"r",expected_calls:9},{id:"D",approach:"y",files:["b"],risk:"r",expected_calls:9});
+  fs.writeFileSync(f, JSON.stringify(p));
+' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'options count 4' <<< "$OUT" \
+  && ok "4 options → fails (allowed 1-3)" || bad "4 options accepted"
+
+# chosen id not in options
+good_plan
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.chosen_option_id="Z";fs.writeFileSync(f,JSON.stringify(p))' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'not in options' <<< "$OUT" \
+  && ok "unknown chosen_option_id → fails" || bad "unknown chosen id accepted"
+
+# expected_calls not a number
+good_plan
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.options[0].expected_calls="thirty";fs.writeFileSync(f,JSON.stringify(p))' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'expected_calls is not a number' <<< "$OUT" \
+  && ok "string expected_calls → fails" || bad "string expected_calls accepted"
+
+# run_cap arithmetic wrong
+good_plan
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.run_cap=60;fs.writeFileSync(f,JSON.stringify(p))' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'run_cap 60 != computed 39' <<< "$OUT" \
+  && ok "wrong run_cap → fails with the computed value" || bad "wrong run_cap accepted"
+
+# run_cap ceiling at 60
+good_plan
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.options[0].expected_calls=90;p.run_cap=60;fs.writeFileSync(f,JSON.stringify(p))' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "cap ceiling: 90 calls → run_cap 60 accepted" || bad "ceiling case rejected: $OUT"
+
+# empty scope_folders
+good_plan
+node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.scope_folders=[];fs.writeFileSync(f,JSON.stringify(p))' "$PRUN/plan.json"
+OUT=$(bash "$PG" "$PRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'scope_folders is empty' <<< "$OUT" \
+  && ok "empty scope_folders → fails" || bad "empty scope_folders accepted"
+
+grep -q 'plan-gate.sh' "$TG/agents/router.md" \
+  && ok "orchestrator runs plan-gate before the approval question" \
+  || bad "nothing ever runs plan-gate.sh"
+
+# ── 26. ledger cap: plan.json run_cap wins, 60 is the fallback ───────────────
+head2 "26. ledger cap: plan.json run_cap wins, 60 is the fallback"
+CRUN="$TMP/cap-run"; mkdir -p "$CRUN"
+CAP=$(bash "$TG/hooks/ledger.sh" cap "$CRUN")
+[ "$CAP" = "60" ] && ok "no plan.json → cap 60" || bad "fallback cap was $CAP"
+printf '{"run_cap": 39}\n' > "$CRUN/plan.json"
+CAP=$(bash "$TG/hooks/ledger.sh" cap "$CRUN")
+[ "$CAP" = "39" ] && ok "plan.json run_cap 39 → cap 39" || bad "cap was $CAP, expected 39"
+printf '{"run_cap": "junk"}\n' > "$CRUN/plan.json"
+CAP=$(bash "$TG/hooks/ledger.sh" cap "$CRUN")
+[ "$CAP" = "60" ] && ok "junk run_cap → fallback 60, not garbage" || bad "junk cap accepted: $CAP"
+grep -q 'ledger.sh cap' "$TG/agents/router.md" \
+  && ok "orchestrator reads the cap from the hook" || bad "run_cap never read pre-spawn"
+
+# ── 27. 3rd retry stops the run with a written BLOCKED verdict ───────────────
+head2 "27. 3rd retry stops the run with a written BLOCKED verdict"
+BRUN="$TMP/blocked-run"
+bash "$GUARD" "$BRUN" T1 >/dev/null 2>&1
+bash "$GUARD" "$BRUN" T1 >/dev/null 2>&1
+OUT=$(bash "$GUARD" "$BRUN" T1 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'verdict=BLOCKED' <<< "$OUT" \
+  && ok "3rd attempt → ESCALATE with verdict=BLOCKED" || bad "no BLOCKED verdict in escalation"
+grep -q 'BLOCKED task=T1' "$BRUN/blocked.log" 2>/dev/null \
+  && ok "blocked.log records the task, hook-written" || bad "blocked.log missing or unnamed"
+# the first two attempts must not have written it
+BRUN2="$TMP/blocked-run2"
+bash "$GUARD" "$BRUN2" T1 >/dev/null 2>&1
+[ ! -f "$BRUN2/blocked.log" ] && ok "a plain retry writes no BLOCKED" || bad "retry 1 already wrote blocked.log"
+
+# ── 28. gate.sh fails assertion-free test cases in test-cases.md ─────────────
+head2 "28. gate.sh fails assertion-free test cases in test-cases.md"
+cd "$FIXTURE" || exit 2
+QRUN="$TMP/qa-run"; mkdir -p "$QRUN"
+cat > "$QRUN/test-cases.md" <<'EOF2'
+# Test cases
+
+### CASE-1 — creates the thing
+- source: plan goal
+- command: curl -s -i http://127.0.0.1:3000/api/thing
+- expect_status: 201
+- expect_body: {"id":1}
+
+### CASE-2 — status-only, asserts nothing
+- source: plan goal
+- command: curl -s -i http://127.0.0.1:3000/api/thing
+- expect_status: 200
+EOF2
+OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'GATE FAIL: assertion-free test cases' <<< "$OUT" \
+  && ok "status-only case → GATE FAIL, named" || bad "assertion-free case passed (rc=$RC)"
+grep -q 'CASE-2' <<< "$OUT" && ok "the offending case is named" || bad "no case id in output"
+
+printf -- '- expect_body: {"ok":true}\n' >> "$QRUN/test-cases.md"
+OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'test-case scan ok' <<< "$OUT" \
+  && ok "asserting cases pass the scan" || bad "honest cases rejected (rc=$RC)"
+
+# expect(true)-style is caught even with a body line present
+printf '### CASE-3 — trivial\n- source: plan goal\n- expect_body: expect(true)\n' >> "$QRUN/test-cases.md"
+OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && ok "expect(true)-style case → GATE FAIL" || bad "expect(true) case passed"
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

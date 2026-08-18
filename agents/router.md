@@ -91,10 +91,12 @@ FAST works in the current tree.
 Everything else. Any of: 3+ files, unknown pattern, schema migration, API
 contract change, multi-surface work, anything you cannot bound confidently.
 
-Route: PM → PjM → Lead → N executors → Tester → Lead merge → report → sign-off
-→ Retro.
+Route: PjM plan (PM scope + Lead options) → plan-gate → **your approval** →
+executors ∥ QA cases → QA runs per task → merge → Lead review (machine gate) →
+summary → end.
 
-Budget: **≤60 tool calls for the whole feature.**
+Budget: **≤60 tool calls until a plan is approved; from approval, the plan's
+own `run_cap`** (`ledger.sh cap <run>` reads it, fallback 60).
 
 Before delegating, create the run directory:
 
@@ -106,16 +108,16 @@ mkdir -p .team-irfan/runs/$(date +%Y%m%d)-<slug>
 path to every downstream node — it is where all state lives. The agents hold
 none.
 
-**All run material lives inside `.team-irfan/`** — brief, tasks, task-specs,
-reports, metrics. Session state, never committed or pushed (`.team-irfan/`
-belongs in `.gitignore` — missing → tell Irfan, do not edit it yourself).
-`.tg-active` stays at repo root — the hooks read it there.
+**All run material lives inside `.team-irfan/`** — plan, task-specs, test
+cases, reports, metrics. Session state, never committed or pushed
+(`.team-irfan/` belongs in `.gitignore` — missing → tell Irfan, do not edit it
+yourself). `.tg-active` stays at repo root — the hooks read it there.
 
 Then append one line to the session ledger `.team-irfan/runs/LEDGER.md`:
 `<yyyy-mm-dd> · <run-id> · <route> · <task, ≤10 words> · OPEN`.
-Flip `OPEN` to the verdict at close-out (step 10). Latest session = last line.
+Flip `OPEN` to the verdict at step 6. Latest session = last line.
 
-Then run the FULL sequence below. **You are the orchestrator.**
+Then run the 7-step sequence below. **You are the orchestrator.**
 
 ---
 
@@ -135,15 +137,15 @@ Each `agents/<node>.md` frontmatter carries `timeout_ms`, `max_attempts` and
 | `idempotent` | writes to its own worktree or overwrites its own file | re-spawn freely |
 | `reconcile` | touches shared state — merges, commits, counters | **check whether the effect already landed, then skip or finish** |
 
-`max_attempts` counts the first attempt. `executor` and `tester` declare 3
-because `retry-guard.sh` allows two retries; change one and the checks fail
-until you change the other.
+`max_attempts` counts the first attempt. `executor` and `qa` declare 3 because
+`retry-guard.sh` allows two retries; change one and the checks fail until you
+change the other.
 
 **Why the topology is a star and not a chain.** You are the only context with a
-channel to Irfan. This graph has three hard human gates — PM's open questions,
-PjM's scope approval, the ship sign-off — and a subagent physically cannot hold
-one: it has no way to stop and ask. A gate held by a subagent is not a gate, it
-is an assumption with a checkbox. So the gates live here, and nothing nests.
+channel to Irfan. This graph has exactly ONE hard human gate — the plan
+approval — and a subagent physically cannot hold it: it has no way to stop and
+ask. A gate held by a subagent is not a gate, it is an assumption with a
+checkbox. So the gate lives here, and nothing nests.
 
 ## Spawning a node
 
@@ -154,8 +156,8 @@ Agent(
   name:          "<node>",
   description:   "<node> for <run>",
   prompt:        "Follow ~/.claude/team-graph/agents/<node>.md as your system
-                  prompt. <artifact paths it needs>.
-                  Output <the one artifact> and nothing else."
+                  prompt. <mode/phase, if the node has one>. <artifact paths it
+                  needs>. Output <the one artifact> and nothing else."
 )
 ```
 
@@ -190,22 +192,19 @@ bash ~/.claude/team-graph/hooks/run-state.sh <run> <node-just-finished> <next-no
 ```
 
 ```
-[3/10] pjm done · 5 tasks · budget 12/60
+[3/7] pjm done · 2 tasks · budget 12/39
 ```
 
-Node, one fact, budget. No prose, no recap of what the node said. A run that
-prints nothing between "starting" and a commit appearing is a run Irfan has to
-audit out of git, which costs him more than the run saved him.
+Node, one fact, budget. No prose, no recap of what the node said.
 
 `run-state.json` is the resume point. Killed mid-run, the next session reads
-`completed` and `current` and continues from there instead of inferring progress
-from which artifacts happen to exist — which cannot tell "never started" from
-"died before writing". Resuming: read `<run>/run-state.json` first, re-spawn
-`current`, and never re-run anything in `completed`.
+`completed` and `current` and continues from there. Resuming: read
+`<run>/run-state.json` first, re-spawn `current`, and never re-run anything in
+`completed`.
 
-## Sequence
+## The 7-step sequence
 
-**1. Open the run**
+**Open the run** (before step 1):
 
 ```bash
 bash ~/.claude/team-graph/hooks/reap.sh   # clear residue from a run that died
@@ -216,93 +215,84 @@ TG_RECORD_BASE=1 TG_RUN=<run> bash ~/.claude/team-graph/hooks/gate.sh
 ```
 
 `reap.sh` runs **first, every time** — at the start, not the end. A run that was
-killed cannot clean up after itself, and a stale `.tg-active` leaves the gate
-hook armed for every unrelated session in this directory. It reports orphan
-branches and never deletes one.
+killed cannot clean up after itself. It reports orphan branches and never
+deletes one. `.tg-active` carries the run directory as its first line; `touch`
+alone leaves the hooks inert.
 
-`.tg-active` carries the run directory as its first line. That is how the
-PostToolUse ledger hook knows where to count, and `touch` alone leaves it inert.
+**Every goal gets its own branch**, off the default branch, never off the
+previous run's. `<type>` ∈ `feat | fix | chore`, same vocabulary as the
+commits. `<slug>` = the goal in 2–4 kebab-case words. Dirty tree → stop and
+ask. Baseline is optional — no coverage provider, the gate says so and the run
+continues.
 
-**Every goal gets its own branch.** Branch off the default branch, never off the
-previous run's branch. `<type>` is the same vocabulary the commits use:
+**STEP 1 — PLAN.** Three spawns, in order, then a deterministic gate, then the
+one human gate:
 
-| type | for |
-|---|---|
-| `feat` | new feature |
-| `fix` | fixing broken behavior |
-| `chore` | docs, config, tooling — anything not user-facing |
+1. **PM** (`opus`) → `<run>/scope.md` — scope-in / scope-out / open questions,
+   every rule sourced (`file:line`, `R-id`, or `ask user`). PM holds no gate;
+   its open questions travel into the plan.
+2. **Lead, mode=options** (`opus`) → `<run>/options.md` — 1–3 options, each
+   with approach, files, risk, `expected_calls`; one marked recommended.
+3. **PjM** (`opus`) → `<run>/plan.md` + `<run>/plan.json` + `task-<id>.md`
+   per task. `run_cap = min(round(chosen expected_calls × 1.3), 60)`.
 
-`<slug>` is the goal in 2–4 kebab-case words. `feat/block-unblock-user`,
-`fix/follow-transaction`, `chore/update-registry-docs`. Dirty tree → stop and
-ask. Never carry uncommitted work onto a new goal branch.
-
-Baseline is optional — no coverage provider, the gate says so and the run
-continues. Do not install one to make the check exist.
-
-**2. PM** (`opus`) → `<run>/brief.md`.
-Returns open questions → **you ask Irfan and wait.** Write the answers into
-`brief.md` as `Irfan confirmed`. Never answer on his behalf.
-
-**3. PjM** (`opus`) → `<run>/tasks.md` + `<run>/task-<id>.md`.
-Returns the SCOPE block → **print the plan in chat FIRST, then ask.** The full
-SCOPE block verbatim, then one verdict line
-(`verdict: <n> tasks, <route shape>, risk: <x>`), then an approval question
-carrying no plan content — it references "the SCOPE printed above". A plan first
-met inside a dialog cannot be read. Same rule for PM questions and sign-off.
-Silence is not approval. Cut tasks get deleted and noted; added tasks get a
-full task-spec.
-
-**3b. Context maps — before any executor spawns**
-
-`tasks.md` now names every in-scope folder. Check which already have one:
+Then, mechanically:
 
 ```bash
-ls .team-irfan/context/
+bash ~/.claude/team-graph/hooks/plan-gate.sh <run>
 ```
 
-For each in-scope folder **without** `.team-irfan/context/<slug>.md`, spawn
-**Init** (`opus`) with that folder and nothing else. Independent folders go in
-one message, multiple tool calls.
+**Paste its output before showing the approval question.** It fails with a
+named reason → re-spawn PjM with that reason (max 2 attempts, then
+`HAND-BACK — plan-gate: <the error>` and stop).
 
-Init is a node, and a leaf cannot spawn a node — so if you skip this, no map is
-ever written and every executor re-reads the same folders from scratch. A run
-whose `metrics.json` says `context_maps_used: none` did exactly that.
-
-Confirm the files exist on disk before step 4. A map you did not verify is a map
-you did not write.
-
-**4. Worktrees — you create them, not Lead**
+⏸ **THE HUMAN GATE — the only one.** Print `plan.md` **in chat, in full,
+first**. Then one approval question carrying **no plan content** — it
+references the plan printed above. **Silence is not approval.** Open questions
+in the plan are answered here, in the same exchange. Irfan cuts an item →
+delete its task file, note the cut, recompute nothing unless the option
+changed. On approval, the plan's `run_cap` replaces the static 60:
 
 ```bash
-git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
+bash ~/.claude/team-graph/hooks/ledger.sh cap <run>    # reads plan.json run_cap, fallback 60
 ```
 
-Task branches inherit the goal's `<type>`. The `tg-` prefix stays on the
-*directory* — it marks a throwaway worktree — never on the branch.
+**Context maps, before any executor:** `tasks` name every in-scope folder;
+`ls .team-irfan/context/` and spawn **Init** (`opus`) for each folder without a
+map — independent folders in one message. A leaf cannot spawn init, so it
+happens here or never. Confirm the files exist on disk.
 
-One per task, never shared. Tasks with `Depends on:` wait for the dependency to
-merge first.
+**STEP 2 — EXECUTE + TEST-CASE GEN, in parallel.** On approval:
 
-**5. Executors** (`opus`) — as many as `tasks.md` has tasks, not one more.
-Backend-only work spawns zero frontend agents. Independent ones go in **one
-message, multiple tool calls**, so they run concurrently. Each gets its
-`task-<id>.md`, its worktree path, the run dir, the base branch → returns
-`change-summary-<id>.md`.
+- Worktrees — you create them, not Lead:
+  ```bash
+  git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
+  ```
+  One per task, never shared. The `tg-` prefix stays on the *directory*, never
+  the branch. Spawn executors per the plan — parallel lanes **only** where the
+  task-spec says `independent: yes`; `Depends on:` waits for the dependency to
+  merge.
+- **Simultaneously** spawn **QA, phase=cases** → `<run>/test-cases.md`, from
+  `plan.json` ONLY — it must not read any diff or worktree. Backend:
+  executable curl cases with status+body assertions. Frontend: browser steps
+  via the `chrome-devtools-axi` skill, or a manual checklist that says so.
+  `gate.sh` scans the file and fails assertion-free cases.
 
-**6. Tester** (`opus`) per task → `test-report-<id>.md`.
+**STEP 3 — QA RUNS.** When an executor finishes a task, spawn **QA,
+phase=run** against that worktree → `test-report-<id>.md`: each case
+PASS/FAIL with pasted command output as evidence. No narrative verdicts.
 
-- **PASS** → mergeable.
-- **FAIL** → the tester already called `retry-guard.sh`. **You** re-spawn the
-  *same* executor role against the *same* worktree, with the `BUG-n` block in
-  the prompt. Not a fresh worktree — the context is the worktree.
-- **ESCALATE** (3rd attempt) → stop that task. Read the three test reports,
-  then hand it to Irfan: re-scope, or drop. Two retries on one root cause means
-  the failure block was not actionable — record that.
-
-Never re-run a failed task yourself "just to check". That is a fourth attempt
+**STEP 4 — FIX LOOP, HARD-CAPPED.** On FAIL: hand ONLY the failing cases +
+evidence to the SAME executor in the SAME worktree — not a fresh one, the
+context is the worktree. `retry-guard.sh` enforces max 2 retries per task. On
+the 3rd failure **the run STOPS**: retry-guard wrote `BLOCKED` to
+`<run>/blocked.log`; write the failing cases and evidence into the summary,
+mark verdict **BLOCKED**, hand to Irfan. No in-chat "continue?" loop, no
+silent retries, and never a re-run "just to check" — that is a fourth attempt
 wearing a different hat.
 
-**7. Merge — one commit per task** — only after a PASS, in dependency order:
+**STEP 5 — MERGE, then LEAD REVIEW (machine gate, no human).** Only after ALL
+test cases pass, one squash commit per task, in dependency order:
 
 ```bash
 # once per task:
@@ -313,103 +303,45 @@ git branch -D <type>/<slug>-<id>
 ```
 
 **The merge is a `reconcile` node — check before you repeat it.** Those four
-commands are one logical effect in three non-atomic steps, and a retry after a
-partial merge either duplicates the commit or drops the task silently, with
-nothing in `metrics.json` able to show which. Before merging a task, check
-whether its effect already landed:
+commands are one logical effect in three non-atomic steps. Before merging a
+task:
 
 ```bash
 git log -1 --format=%s          # already this task's subject? the merge landed
 git worktree list               # worktree gone? the merge finished
 ```
 
-Landed → skip to the next task. Squashed but not committed (a dirty index on the
-goal branch) → finish the commit, do not squash again. This is what
-`effect_policy: reconcile` in a node's frontmatter obliges: verify, then act.
-
-**`--squash` collapses one worktree's own commits and nothing else.** It is
-there because an executor's in-progress commits are noise. It is not a way to
-fold tasks together: separate work stays a separate commit. Never one
-mega-commit for the run.
+Landed → skip. Squashed but not committed → finish the commit, do not squash
+again. `--squash` collapses one worktree's own commits and nothing else —
+separate work stays a separate commit, never one mega-commit.
 
 **Before the last task's commit, update `docs/REGISTRY.md` and stage it with
-that commit.** One entry per *feature*
-worked, not one per task — newest-first, directly below the Index, and update
-that feature's Index row:
+that commit** — one entry per feature, newest-first below the Index, number
+from `grep -m1 '^### R-' docs/REGISTRY.md`, under 15 lines. The registry entry
+and the code land in **one commit**. Commit messages: Conventional Commits,
+imperative, ≤72 chars, naming what landed. **No AI attribution trailer** —
+`git log -1` after committing and amend one out if a global setting added it.
+A merge conflict between two tasks means PjM mis-sized them: resolve it, note
+it in the summary's Lessons.
 
-```markdown
-### R-00NN · <yyyy-mm-dd> · [FEAT:<x>] [MOD:<a,b>] [STATUS:shipped] [DEC:<yes|no>]
+Then spawn **Lead, mode=review** (`opus`) against the MERGED diff only
+(`git diff` against the pre-run base, never whole files) → `<run>/report.md`,
+verdict **PASS** or **BLOCKED**, every checklist item with pasted evidence:
+backward compatibility (a breaking change is BLOCKED, never a footnote);
+typecheck/lint/tests/build via `gate.sh`, output pasted; no files outside
+`plan.json` `scope_folders`. BLOCKED with a fixable cause → back to the
+executor **within the same retry budget**; otherwise the run stops with the
+report. There is no human sign-off — this verdict is the ship gate.
 
-**Input**
-<the task as Irfan gave it, one to three lines.>
-
-**Output**
-- files: `path/a.ts`, `path/b.ts`
-- change: <what now exists that did not before, one to three lines.>
-- decision: <only if DEC:yes — what was chosen and what was rejected.>
-- tests: `path/x.spec.ts` (integration)
-
-**Verdict**
-shipped — <one line: what a future session needs, including what was
-deliberately left undone.>
-```
-
-Under 15 lines. It is an index into the code, not a description of it. Number
-continues from the highest existing `R-` — `grep -m1 '^### R-' docs/REGISTRY.md`
-to find it, do not read the file whole.
-
-The registry entry and the code land in **one commit**. Committing the code
-first and the registry "after" is how a registry goes stale, and a stale
-registry is worse than none — every later run trusts it and skips the read.
-
-Every merge commit follows the rule the executors follow: Conventional Commits,
-imperative, one line, ≤72 chars, naming **what landed** — never the task id it
-squashed. **No `Co-Authored-By`, no `Generated with`, no AI attribution
-trailer.** A global git or harness setting may append one anyway: `git log -1`
-after committing and amend it out if it is there.
-
-A merge conflict between two tasks means PjM mis-sized them: resolve it, and
-put it in `lessons.md`. Never silently take one side.
-
-**8. Lead** (`opus`) → reviews the **merged** diff, drafts `report.md`.
-Reviews the merged diff, not each worktree — the bug that matters is the one
-two tasks create together. **Max 2 review rounds**; still failing → write the
-handoff and stop.
-
-**9. Sign-off** → `report.md` lives in the run directory, outside the repo, and
-nobody reads it there. Print this block in chat **and** write it to
-`.team-irfan/handoffs/<yyyy-mm-dd>-<slug>.md` (session state, never pushed):
-
-```markdown
-**What landed:** <2–3 lines>
-**How to run:** <copy-pasteable command>
-**How to test:** <copy-pasteable command — the literal string, not a description of one>
-**Proof:** <the gate.sh result line, pasted, never summarised>
-**Not done:** <what was cut or left behind, or `none`>
-**Verdict:** shipped | partial | blocked — <one line>
-```
-
-Then wait. A breaking change is a Blocker inside that block, never a footnote,
-and it does not ship without Irfan's explicit acceptance.
-
-**After sign-off, write the stakeholder report** `docs/reports/<date>-<slug>.md`.
-**Write it, never commit it** — Irfan reads it and commits it himself.
-Concise, from `report.md` evidence only:
-
-- **What was done** — 2–3 lines
-- **Changes** — files touched (`git diff --stat`, pasted)
-- **Effect** — what behaves differently now, from a user/API-consumer view
-- **Breaking changes / Blockers** — explicit lists, or `none`
-- **How to test** — copy-pasteable `curl` per new/changed endpoint (`$BASE_URL`,
-  real body, expected response) + one line each on the diff vs before; for FE.
-- **Verdict** — shipped | partial | blocked — one line
-
-Mermaid only when a flow changed. Pasted output, never narrative.
-
-**10. Close out**
+**STEP 6 — SUMMARY.** Write `.team-irfan/handoffs/<yyyy-mm-dd>-<slug>.md`
+from `templates/summary.md`, SHORT: what the team did (one line per node),
+the changes (`git diff --stat` pasted), the test cases with pass/fail counts,
+how to test (paste-able commands), breaking changes (or "none"), lessons (max
+3 lines — this replaces the retro), a small mermaid diagram of what ran, and a
+one-line verdict. **Print the summary in chat too.** Then:
 
 ```bash
-bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL 0 60 \
+bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL 0 <run_cap> \
   folders=<a,b> context_maps_used=<slug,slug> maps_refreshed=<slug> \
   gate_fails="<stage>:<reason>;<stage>:<reason>" \
   escalated=<true|false> shipped=true human_overrides=<scope-cut,cap-raised> \
@@ -417,63 +349,55 @@ bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL 0 60 \
 rm .tg-active
 ```
 
-**`route_outcome` you ask, you never decide.** One question, four answers —
-`correct`, `should-have-run`, `should-have-handed-back`, `wrong-tier`. It is the
-only field that can tell the rubric it is wrong, and a route grading itself
-grades itself `correct`. No answer → leave it out; `null` is honest, a guess is
-not.
+Flip the `LEDGER.md` line to the verdict. Pass `0` for tool calls —
+`metrics.sh` reads the real total from `ledger.log`. `retries`, `over_budget`,
+`gate_caught` and `review_rounds` are derived; do not pass them.
+**`route_outcome` you ask, you never decide** — `correct | should-have-run |
+should-have-handed-back | wrong-tier`; no answer → leave it out, `null` is
+honest. `context_maps_used` and `maps_refreshed` name files that exist on
+disk — `ls .team-irfan/context/` before you pass them.
 
-`context_maps_used` and `maps_refreshed` name **files that exist on disk**.
-`ls .team-irfan/context/` before you pass them. Reporting a refresh of a map
-that was never written makes the metric worse than absent — the evaluation node
-reads it as evidence the memory layer worked.
-
-Pass `0` for tool calls. `metrics.sh` reads the real total from `ledger.log` and
-ignores whatever you passed. `retries`, `over_budget`, `gate_caught` and
-`review_rounds` are derived the same way — from `retries.json`, the budget, the
-gate stages, and the `lead` entries in `run-state.json`. Do not pass them, and do
-not correct them afterwards. The only field you supply is the one Irfan answers.
-Then spawn **Retro** (`opus`) → `lessons.md`, and show it to Irfan.
+**STEP 7 — END.** The session terminates after the summary. Nothing else
+runs — no retro, no sign-off, no stakeholder report.
 
 ## The budget ledger — the hook owns it, you read it
 
-**≤60 tool calls for the whole feature**, everyone's included. Per-node budgets
-are ceilings, not allowances; they sum to ~100 for a 2-task feature, which is
-the point — no run may spend every ceiling.
+The cap is **≤60 tool calls until a plan is approved, then the plan's
+`run_cap`** — everyone's calls included. Per-node budgets are ceilings, not
+allowances.
 
-You do not count. The PostToolUse hook counts, into `<run>/ledger.log`. Read it:
+You do not count. The PostToolUse hook counts, into `<run>/ledger.log`. Read
+both sides before EVERY spawn:
 
 ```bash
-bash ~/.claude/team-graph/hooks/ledger.sh read <run>    # prints the total
+bash ~/.claude/team-graph/hooks/ledger.sh read <run>    # the total so far
+bash ~/.claude/team-graph/hooks/ledger.sh cap <run>     # run_cap, fallback 60
 ```
 
-Print that number in the progress line. Never a number you added up yourself —
-an orchestrator counting its own tool calls is the measured party reporting the
-measurement, and every routing conclusion downstream inherits the error.
+Print the total in the progress line — never a number you added up yourself:
+an orchestrator counting its own tool calls is the measured party reporting
+the measurement. Hook not wired (`ledger.log` absent after a few nodes)? Say
+so once, in one line, and keep going. Do not substitute a hand count.
 
-Hook not wired (`ledger.log` absent after a few nodes)? Say so once, in one
-line, and keep going. Do not substitute a hand count.
-
-At **60, stop.** Write `report.md` with what is done, the rest under Blockers,
-hand it to Irfan. A feature that needs 90 calls is a feature PjM sized wrong,
-and he needs to see that — not a tidy result that hides it. Projected over 60
-before you start (roughly `20 + 27×tasks`)? Say so **before** the first
-worktree and let him raise the cap or cut scope.
-
-**Enforcement is mechanical.** Before EVERY node spawn: `ledger.sh read <run>`.
-Total ≥ cap → do not spawn: stop, write `report.md`, hand to Irfan. The cap
-moves only on an explicit number from Irfan — record `cap-raised:<n>` in
-`human_overrides`; "keep going" is not a number. A second raise on one run is a
-PjM sizing failure: say so when you ask.
+**Enforcement is mechanical.** total ≥ cap → do not spawn: stop, write the
+summary with what is done and the rest under breaking-changes/blockers, hand
+to Irfan. The cap moves only on an explicit number from Irfan — record
+`cap-raised:<n>` in `human_overrides`; "keep going" is not a number. A second
+raise on one run is a plan-sizing failure: say so when you ask. Projected over
+the cap before the first worktree (`plan-gate` already showed the numbers)?
+Say so and let him raise it or cut scope.
 
 ## Orchestrator forbidden
 
 - Doing a node's work yourself. You sequence and you talk to Irfan.
 - Answering a node's question to Irfan on his behalf.
-- Proceeding past a gate on silence.
+- Proceeding past the plan gate on silence.
+- Showing the approval question before plan-gate.sh output and the full plan.
 - Letting any node spawn another node.
-- Merging without a PASS, or past an ESCALATE.
-- Leaving `.tg-active`, a worktree, or a `tg/` branch behind.
+- Letting QA phase=cases see a diff or worktree.
+- Merging without every case PASS, or past an ESCALATE.
+- A second human gate — the plan approval is the only one.
+- Leaving `.tg-active`, a worktree, or a `tg-` worktree branch behind.
 - Typing a tool-call total. You read `ledger.sh`, you do not count.
 - Skipping `reap.sh` at the start, or `run-state.sh` after a node.
 

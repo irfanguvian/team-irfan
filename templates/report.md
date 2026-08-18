@@ -1,34 +1,41 @@
-# Report — <feature>
+# Review — <feature>
 
 run: <yyyymmdd-slug>
+author: Lead (mode=review)
+verdict: **PASS** | **BLOCKED**
 
-**Done:** <what was completed. files and behavior, named. bullets.>
+This is the machine ship gate — no human sign-off follows it. Every claim
+below is backed by pasted command output, in this file. A sentence with no
+output behind it is an opinion, and this report is not for opinions.
 
-**Fine or not:** <concerns. contract changes, ponytail shortcuts, tests
-rewritten in slop review, guardrail findings left unfixed, anything unverified.
-"clean" only if genuinely clean.>
+## Backward compatibility
 
-**Blockers:** <what needs Irfan. breaking changes ALWAYS land here. or "none">
+<every changed public function signature, route, or DTO/response shape, listed
+explicitly — or "none". ANY breaking change ⇒ verdict BLOCKED, never a
+footnote.>
 
-**Next:** <the obvious follow-up, or "nothing">
+## Gate
 
-## Ship checklist
+```
+<bash ~/.claude/team-graph/hooks/gate.sh — output pasted verbatim>
+```
 
-Every box is a fact with evidence in this run directory, not a self-assessment.
-An unchecked box is a blocker, not a caveat.
+## Scope
 
-- [ ] `gate.sh` output pasted — every task, `GATE PASS`
-- [ ] tester evidence attached — real command output in each `test-report-<id>.md`
-- [ ] `docs/REGISTRY.md` updated in the merge commit (FEAT/MOD/STATUS/DEC)
-- [ ] forbidden-actions clean — no push, no deploy, no CI trigger, no secret
-      read, no destructive migration
-- [ ] terminus is a **local merge commit** — nothing pushed, nothing deployed
-- [ ] awaiting Irfan's sign-off ← **the workflow stops here**
+```
+<git diff --name-only <base>..HEAD — pasted. every path must be inside
+plan.json scope_folders.>
+```
 
----
+## Findings
 
-<gate output and test-report verdicts, pasted>
+<file:line + the offending lines quoted. or "none".>
 
-**Verdict:** shipped | partial | blocked | reverted | abandoned — <one line:
-what a future session needs to know, including what was deliberately left
-undone.>
+## Diff
+
+```
+<git diff --stat <base>..HEAD — pasted verbatim>
+```
+
+**Verdict:** PASS | BLOCKED — <one line: the blocking cause, or what a future
+session needs to know>

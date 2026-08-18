@@ -48,3 +48,8 @@ touches. not all of them — the ones a reviewer must check.>
 ## Depends on
 
 <other task ids that must merge first, or "none">
+
+independent: yes | no
+
+<yes ⇔ no file shared with any other task. the orchestrator parallelises ONLY
+independent lanes.>
