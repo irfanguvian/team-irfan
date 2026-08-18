@@ -1,0 +1,19 @@
+{
+  "goal": "<one sentence — the behavior that exists after this run>",
+  "scope_folders": ["src/app/thing"],
+  "options": [
+    {
+      "id": "A",
+      "approach": "<one line>",
+      "files": ["path/a.ts", "path/b.ts"],
+      "risk": "<one line>",
+      "expected_calls": 30
+    }
+  ],
+  "chosen_option_id": "A",
+  "test_contract": {
+    "type": "backend-e2e|frontend-browser|both",
+    "cases_source": "plan"
+  },
+  "run_cap": 39
+}
