@@ -225,6 +225,34 @@ else
   echo "gate: stub scan ok ($(printf '%s\n' "$TEST_FILES" | wc -l | tr -d ' ') test file(s))"
 fi
 
+# ------------------------------------------- 5b. assertion-free test cases
+
+# QA writes <run>/test-cases.md from plan.json. A case that asserts nothing —
+# status-only with no body/effect check, or an expect(true)-style line — is the
+# markdown twin of a stub test, and it is caught the same way: deterministically,
+# with a name, never by a review prompt.
+TC="${TG_RUN:-}/test-cases.md"
+if [ -n "${TG_RUN:-}" ] && [ -f "$TC" ]; then
+  TCBAD=""
+  # expect(true)-style lines anywhere in the file
+  TRIV=$(grep -nE 'expect\([[:space:]]*true[[:space:]]*\)|assert\.ok\([[:space:]]*true[[:space:]]*\)' "$TC" 2>/dev/null | sed "s|^|$TC:|")
+  [ -n "$TRIV" ] && TCBAD="$TRIV"$'\n'
+  # a CASE block with no non-empty expect_body/expect_effect line
+  NOASSERT=$(awk -v f="$TC" '
+    function flush() { if (id != "" && !ok) printf "%s:%d: %s has no expect_body/expect_effect\n", f, ln, id }
+    /^### CASE-/ { flush(); id=$2; ln=NR; ok=0; next }
+    /^-?[[:space:]]*expect_(body|effect):[[:space:]]*[^[:space:]]/ { ok=1 }
+    END { flush() }
+  ' "$TC")
+  [ -n "$NOASSERT" ] && TCBAD="$TCBAD$NOASSERT"$'\n'
+  TCBAD=$(printf '%s' "$TCBAD" | sed '/^$/d')
+  if [ -n "$TCBAD" ]; then
+    echo "$TCBAD" | show
+    fail "assertion-free test cases"
+  fi
+  echo "gate: test-case scan ok ($TC)"
+fi
+
 # ------------------------------------------------------- 6. mutation smoke
 
 # Opt-in (TG_MUTATE=1) because it re-runs the suite once per source file. The
