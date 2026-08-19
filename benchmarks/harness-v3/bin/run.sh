@@ -22,7 +22,18 @@ MAX_TURNS="${MAX_TURNS:-150}"
 # Pinned explicitly: arm A has an empty settings.json and would otherwise take the
 # CLI default, while arms B and C inherit the operator's "model": "opus". Same
 # model in every arm is the whole premise.
-MODEL="${BENCH_MODEL:-claude-opus-5}"
+#
+# TG_BENCH_MODEL=haiku|sonnet runs the harness×model matrix: it pins --model on
+# every arm AND is exported into arm C, where the router overrides its per-node
+# matrix uniformly and metrics.sh stamps bench_model into metrics.json. The
+# production matrix keeps `haiku: never`; only this variable ever bypasses it,
+# and every number it produces is labeled.
+case "${TG_BENCH_MODEL:-}" in
+  haiku)  MODEL="claude-haiku-4-5-20251001" ;;
+  sonnet) MODEL="claude-sonnet-5" ;;
+  "")     MODEL="${BENCH_MODEL:-claude-opus-5}" ;;
+  *)      echo "run.sh: TG_BENCH_MODEL must be haiku or sonnet, got ${TG_BENCH_MODEL}" >&2; exit 1 ;;
+esac
 DRY=0
 
 # Fastest expected first: a one-liner, then a localised fix, then a feature,
@@ -77,6 +88,7 @@ run_cell() {
     cd "$wt"
     CLAUDE_CONFIG_DIR="$H/configs/$arm" \
     TEAM_IRFAN_AUTO_APPROVE=1 \
+    TG_BENCH_MODEL="${TG_BENCH_MODEL:-}" \
     DATABASE_URL="file:./bench-$arm-$round.db" \
     API_KEY=bench-key \
       claude "${flags[@]}" <<< "$prompt"
@@ -91,7 +103,9 @@ run_cell() {
 
   jq -n --arg t "$task" --arg a "$arm" --arg r "$round" --arg s "$status" \
         --argjson w $((end - start)) --arg wt "$wt" \
-    '{task:$t,arm:$a,round:$r,status:$s,wall_sec:$w,worktree:$wt}' > "$out/meta.json"
+        --arg bm "${TG_BENCH_MODEL:-}" --arg m "$MODEL" \
+    '{task:$t,arm:$a,round:$r,status:$s,wall_sec:$w,worktree:$wt,model:$m,
+      bench_model:(if $bm == "" then null else $bm end)}' > "$out/meta.json"
   echo "[$task/$arm/$round] $status  $((end - start))s"
 }
 

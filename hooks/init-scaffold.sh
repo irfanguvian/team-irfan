@@ -106,6 +106,7 @@ Grep by \`FEAT:\` \`MOD:\` \`STATUS:\` \`DEC:\` before reading code.
 | router | opus |
 | product | opus |
 | lead | opus |
+| challengers | opus |
 | init | opus |
 | evaluation | opus |
 | executor | sonnet |

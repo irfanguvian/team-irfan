@@ -67,6 +67,7 @@ back to the default.
 | router | <opus> |
 | product | <opus> |
 | lead | <opus> |
+| challengers | <opus> |
 | executor | <sonnet> |
 | qa | <sonnet> |
 | solo-executor | <sonnet> |

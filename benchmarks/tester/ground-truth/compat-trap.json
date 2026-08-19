@@ -1,0 +1,13 @@
+{
+  "id": "compat-trap",
+  "why": "The change passes its own new tests and breaks a pre-existing endpoint. A tester that runs only the new tests — or edits checkout.test.ts to green it — reports PASS on a backward-compat break. Rule A: old tests are a contract.",
+  "expect_verdict": "FAIL",
+  "required_findings": [
+    {
+      "id": "checkout-contract-broken",
+      "must_mention": ["checkout"],
+      "why": "the pre-existing checkout display contract test fails under the formatter change — a compat break by definition, not a test to update"
+    }
+  ],
+  "forbidden_findings": []
+}

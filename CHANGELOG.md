@@ -5,6 +5,87 @@ project's.
 
 ---
 
+## v3.1.0 — 2026-08-19
+
+The v3 redesign completed: role merge, challengers, budget-phased planning,
+agent memory, backward-compat machinery, and the harness×model benchmark
+matrix. Star topology, one human gate, hooks inert without `.tg-active`,
+ledger over self-report, and deterministic-checks-never-in-prompts all
+preserved — and now checked harder (306 checks, up from 205).
+
+**Breaking — node roster, graph.json, templates:**
+
+- **PM + PjM merged into `product`.** One node owns product, project, and
+  business flow; no brief→tasks handover. `agents/pm.md` and `agents/pjm.md`
+  deleted; `agents/product.md` added. `plan.md` is the one artifact set:
+  business rules (each sourced — an inferred rule is a question, not a rule),
+  SCOPE block, PHASES block, and per-task spec blocks. Templates `scope.md`
+  and `task-spec.md` folded into `templates/plan.md` and deleted; executors
+  receive their own `### Task T<id>` block, never the whole plan. Lead's
+  `mode=options` removed — the challenger generates alternatives instead.
+- **graph.json rewired**: `product` + three challenger nodes + `plan-check`,
+  gate count still exactly 1.
+
+**Challengers — parallel verification without breaking the star:**
+
+- `product-challenger`, `qa-challenger`, `lead-challenger` — spawned by the
+  orchestrator only (roles never spawn), debating via artifacts
+  (`challenge.md`, `challenge-qa.md`, `challenge-lead.md`), ≤5 tool calls
+  each, side_effect_free, FULL route only. One revision round; unresolved
+  disagreement goes to Irfan with both positions. A user-specified solution
+  path is verified, never second-guessed with alternatives. Lead vs
+  lead-challenger verdict disagreement is an automatic blocker.
+
+**Budget-phased planning:**
+
+- Every plan carries a `## PHASES` block (`budget_cap: 60`,
+  `projection_formula: 26 + 27*tasks` — up from the implicit 20+27 to price
+  the challengers in). New `hooks/plan-check.sh` recomputes every projection
+  from the task count and bounces any over-cap phase before the gate is
+  shown. Multi-phase plans execute phase 1 only; each later phase is a fresh
+  run. Design-time check; the pre-spawn ledger check stays as the runtime
+  backstop.
+
+**Agent memory — Product + Lead only (`docs/memory.md`):**
+
+- `hooks/memory.sh`: SQLite + FTS5/BM25, per-repository, in
+  `.team-irfan/memory/`. Ingest via SubagentStop/Stop hooks (artifacts, not
+  transcripts; one Haiku call with a JSON-ops-only contract — Haiku
+  proposes, the pipeline disposes; malformed JSON logged and dropped).
+  Deterministic retrieval at spawn (stemming → MATCH → BM25 → top-12,
+  `[maybe-stale]` on rows whose source files changed). Compiled always-load
+  views; init seeding (Product by reading, Lead by RUNNING the detected
+  commands); compact with a 500-row cap and optional REFLECT pass. Memory
+  never blocks: every failure exits 0 after one `memory.log` line, and
+  `/team-irfan-evaluation` reads that log for a health verdict. The
+  mem0-style vector/entity/score-fusion design is rejected on record.
+
+**Backward compatibility, first-of-mind:**
+
+- **Rule A**: a failing pre-existing test IS a compat break; restore or
+  declare `INTENTIONAL BREAKING` (valid only if the approved plan declares
+  it). Nobody edits an old test to green new work.
+- `skills/guardrails/breaking-changes.md`: the static checklist (request/
+  response contracts, routes, code level, data, events, frontend), loaded by
+  executor + QA + Lead + both reviewing challengers; an undeclared hit is a
+  blocker.
+- QA's persistent regression suite: `.team-irfan/qa/` +
+  `regression.manifest`, executed whole every run by `hooks/qa-manifest.sh`
+  (exit-code honest, loud on missing files); new cases appended on ship. The
+  suite only grows.
+
+**Benchmarks — workflow vs model:**
+
+- Harness ∈ {bare, OMC, team-irfan} × model ∈ {haiku, sonnet} via
+  `TG_BENCH_MODEL`, which overrides the production matrix uniformly and
+  stamps `bench_model` into `metrics.json` — production keeps `haiku:
+  never`. New `compat-trap` tester fixture (passes its own tests, breaks the
+  pre-existing `checkout` endpoint); `run.sh --score` extended with measured
+  dimensions (gate, regression, ledger tool calls vs labeled transcript
+  counts, retries, wall time). Fixture gained the second endpoint.
+
+---
+
 ## v3.0.0 — 2026-08-18
 
 The FULL path restructured to a 7-step harness. Triage tiers (HAND-BACK,

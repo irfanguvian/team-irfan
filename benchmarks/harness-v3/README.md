@@ -106,6 +106,24 @@ default while B and C inherit the operator's `"model": "opus"`. Arm C still gets
 its own per-agent model matrix underneath — that is part of the harness, and cost
 is compared in dollars, so the mix is fairly priced.
 
+### The harness × model matrix — `TG_BENCH_MODEL`
+
+The claim under test is that correctness comes from the harness, not the model.
+So the matrix is harness ∈ {bare, omc, team} × model ∈ {haiku, sonnet}, 3 rounds
+each, same model across all arms within a round:
+
+```bash
+TG_BENCH_MODEL=haiku  bin/run.sh all     # every arm on haiku
+TG_BENCH_MODEL=sonnet bin/run.sh all     # every arm on sonnet
+```
+
+`TG_BENCH_MODEL` pins `--model` on every arm AND flows into arm C, where the
+router overrides its per-node matrix uniformly and `metrics.sh` stamps
+`bench_model` into `metrics.json`. **The production matrix keeps `haiku:
+never`** — this variable is the only thing that bypasses it, and every number
+it produces carries the label, so a benchmark result can never be mistaken for
+a production run. `meta.json` records both the alias and the resolved model id.
+
 Every run gets its own git worktree, its own SQLite file, and its own cloned
 `node_modules`, so nothing leaks between rounds. Session transcripts land under
 each arm's own config dir, so one arm cannot read another's.

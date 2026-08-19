@@ -1216,6 +1216,63 @@ grep -q 'memory.log' "$TG/agents/evaluation.md" \
 grep -q 'memory hooks healthy' "$TG/agents/evaluation.md" \
   && ok "evaluation states a plain memory verdict" || bad "no memory verdict in evaluation"
 
+# ── 33. benchmarks: compat trap scored, TG_BENCH_MODEL stamped, dims measured ─
+head2 "33. benchmarks: compat trap, TG_BENCH_MODEL stamping, measured dimensions"
+SC="$TMP/score33"; mkdir -p "$SC"
+printf 'verdict: FAIL\n\nBUG-1: the pre-existing checkout contract test breaks under the formatter change\n' > "$SC/trap-caught.md"
+printf 'verdict: PASS\n\nnew format tests all green\n' > "$SC/trap-missed.md"
+bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" >/dev/null 2>&1 \
+  && ok "scorer passes a report that caught the compat break" || bad "correct trap report failed"
+bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-missed.md" >/dev/null 2>&1 \
+  && bad "scorer passed a report blind to the broken endpoint" \
+  || ok "scorer fails the report that trusted the new tests alone"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+
+# extended dimensions come from measured artifacts, never typed
+DR="$TMP/dimrun"; mkdir -p "$DR"
+printf 'exec-1\nexec-1\nqa\n' > "$DR/ledger.log"
+printf '{"T1": 1}\n' > "$DR/retries.json"
+printf 'gate: unit tests ok\n\nGATE PASS\n' > "$DR/gate.out"
+printf 'REGRESSION PASS: 2 run, 0 skipped\n' > "$DR/reg.out"
+OUT=$(TG_SCORE_RUN="$DR" TG_SCORE_GATE="$DR/gate.out" TG_SCORE_REGRESSION="$DR/reg.out" \
+      TG_SCORE_WALL=421 TG_BENCH_MODEL=haiku \
+      bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" 2>/dev/null)
+node -e '
+  const s = JSON.parse(process.argv[1]);
+  const fail = m => { console.error(m); process.exit(1); };
+  if (s.tool_calls?.n !== 3 || s.tool_calls?.source !== "ledger") fail("tool_calls not ledger-sourced: " + JSON.stringify(s.tool_calls));
+  if (s.retries !== 1) fail("retries not read from retries.json");
+  if (s.gate !== "PASS") fail("gate result not read from gate output");
+  if (s.regression !== "PASS") fail("regression result not read");
+  if (s.wall_sec !== 421) fail("wall time lost");
+  if (s.bench_model !== "haiku") fail("bench_model not stamped");
+' "$OUT" && ok "score carries gate/regression/ledger-calls/retries/wall/bench_model" \
+         || bad "extended score dimensions wrong"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+# a transcript-sourced count is labeled as such — it is not a ledger number
+printf '{"num_turns": 42}\n' > "$DR/result.json"
+OUT=$(TG_SCORE_TRANSCRIPT="$DR/result.json" bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" 2>/dev/null)
+node -e '
+  const s = JSON.parse(process.argv[1]);
+  if (s.tool_calls?.n !== 42 || !/transcript/.test(s.tool_calls?.source || "")) process.exit(1);
+' "$OUT" && ok "transcript count labeled, never passed off as a ledger" \
+         || bad "transcript count unlabeled"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+
+# metrics.sh stamps bench_model ONLY under TG_BENCH_MODEL
+BMRUN="$TMP/bm-run"; mkdir -p "$BMRUN"
+TG_BENCH_MODEL=sonnet bash "$TG/hooks/metrics.sh" "$BMRUN" FULL 3 60 shipped=true >/dev/null 2>&1
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).bench_model === "sonnet" ? 0 : 1)' "$BMRUN/metrics.json" \
+  && ok "TG_BENCH_MODEL=sonnet → bench_model stamped" || bad "bench_model not stamped"
+BMRUN2="$TMP/bm-run2"; mkdir -p "$BMRUN2"
+bash "$TG/hooks/metrics.sh" "$BMRUN2" FULL 3 60 shipped=true >/dev/null 2>&1
+node -e 'process.exit("bench_model" in JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")) ? 1 : 0)' "$BMRUN2/metrics.json" \
+  && ok "production metrics carry no bench_model" || bad "bench_model leaked into production metrics"
+grep -q 'TG_BENCH_MODEL' "$TG/agents/router.md" \
+  && ok "router honors the uniform benchmark override" || bad "router ignores TG_BENCH_MODEL"
+grep -q 'TG_BENCH_MODEL' "$TG/benchmarks/harness-v3/README.md" \
+  && ok "harness README documents the matrix override" || bad "TG_BENCH_MODEL undocumented"
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo
 echo "────────────────────────────────────────"

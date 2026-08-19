@@ -73,8 +73,10 @@ case "${1:-}" in
   --prompt)
     FIX="${2:-}"; [ -n "$FIX" ] || usage 2
     [ -d "$SET/fixtures/$FIX" ] || { echo "no fixture $FIX" >&2; exit 2; }
+    # the tester set is exercised by the QA prompt (tester was renamed qa in v3)
+    PROMPT_FILE="$AGENT"; [ "$AGENT" = "tester" ] && PROMPT_FILE="qa"
     cat <<EOF
-Follow ~/.claude/team-graph/agents/$AGENT.md as your system prompt.
+Follow ~/.claude/team-graph/agents/$PROMPT_FILE.md as your system prompt.
 
 Fixture: $SET/fixtures/$FIX
 Spec:    $SET/fixtures/$FIX/task-1.md
@@ -88,6 +90,16 @@ EOF
   --score)
     FIX="${2:-}"; REPORT="${3:-}"
     [ -n "$FIX" ] && [ -f "$REPORT" ] || usage 2
+    # Extended dimensions, each read from a MEASURED artifact, never typed:
+    #   TG_SCORE_RUN=<run-dir>       team-irfan arm — ledger.log → tool_calls
+    #                                (source: ledger), retries.json → retries
+    #   TG_SCORE_TRANSCRIPT=<file>   other arms — result.json num_turns →
+    #                                tool_calls (source: transcript, labeled)
+    #   TG_SCORE_GATE=<file>         gate.sh output → gate PASS|FAIL
+    #   TG_SCORE_REGRESSION=<file>   qa-manifest.sh output → regression PASS|FAIL
+    #   TG_SCORE_WALL=<seconds>      wall time as measured by the runner
+    #   TG_BENCH_MODEL=haiku|sonnet  stamped as bench_model — a benchmark
+    #                                number can never pass as a production run
     TG_FIX="$FIX" node -e '
       const fs = require("fs"), path = require("path");
       const [set, report] = process.argv.slice(1);
@@ -113,6 +125,37 @@ EOF
         verdict_got: gotVerdict,
         verdict_ok: gotVerdict === g.expect_verdict,
       };
+      // extended, measured dimensions — absent input → null, and null is not 0
+      const env = process.env;
+      const readTail = (f, re) => {
+        try { const m = re.exec(fs.readFileSync(f, "utf8")); return m ? m[1] : null; }
+        catch { return null; }
+      };
+      score.gate = env.TG_SCORE_GATE
+        ? (readTail(env.TG_SCORE_GATE, /GATE (PASS|FAIL)/) || null) : null;
+      score.regression = env.TG_SCORE_REGRESSION
+        ? (readTail(env.TG_SCORE_REGRESSION, /REGRESSION (PASS|FAIL)/) || null) : null;
+      score.tool_calls = null;
+      if (env.TG_SCORE_RUN) {
+        try {
+          const lines = fs.readFileSync(path.join(env.TG_SCORE_RUN, "ledger.log"), "utf8")
+            .split("\n").filter(Boolean).length;
+          score.tool_calls = { n: lines, source: "ledger" };
+        } catch {}
+        try {
+          const r = JSON.parse(fs.readFileSync(path.join(env.TG_SCORE_RUN, "retries.json"), "utf8"));
+          score.retries = Object.values(r).reduce((a, b) => a + b, 0);
+        } catch { score.retries = null; }
+      } else if (env.TG_SCORE_TRANSCRIPT) {
+        try {
+          const t = JSON.parse(fs.readFileSync(env.TG_SCORE_TRANSCRIPT, "utf8"));
+          score.tool_calls = { n: t.num_turns ?? null, source: "transcript (turn count, not a ledger)" };
+        } catch {}
+        score.retries = null;
+      } else { score.retries = null; }
+      score.wall_sec = env.TG_SCORE_WALL ? Number(env.TG_SCORE_WALL) : null;
+      score.bench_model = env.TG_BENCH_MODEL || null;
+
       score.pass = score.found === score.required && !score.false_positives.length && score.verdict_ok;
       console.log(JSON.stringify(score, null, 2));
       const out = path.join(set, "..", "baselines", ".last-" + id + ".json");

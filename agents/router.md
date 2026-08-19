@@ -179,6 +179,12 @@ account is at its Opus cap, and say so: `exec-3 fable (opus capped)`. Never
 Pass `model` explicitly on every spawn. The `model:` line in a role file is
 documentation, not configuration; nothing reads it.
 
+**`TG_BENCH_MODEL` set (haiku|sonnet)?** You are inside the benchmark
+harness: spawn EVERY node with that model, overriding the whole matrix
+uniformly — `metrics.sh` stamps it as `bench_model` so the run can never be
+read as production. The production rule (`haiku: never`) stands everywhere
+else.
+
 Hand each node **only** its artifact paths. No repo tour, no sibling context,
 no summary of what the others are doing.
 
