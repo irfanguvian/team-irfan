@@ -1159,6 +1159,63 @@ grep -q 'init-lead' "$TG/agents/init.md" \
 grep -q 'ingest --agent product' "$TG/agents/init.md" \
   && ok "init seeds product memory from the domain read" || bad "init never seeds product memory"
 
+# ── 32. memory infer + compact: Haiku proposes, the pipeline disposes ────────
+head2 "32. memory infer path: malformed JSON dropped, ops applied, compact caps"
+MEM="$TG/hooks/memory.sh"
+SHIM="$TMP/claude-shim"; mkdir -p "$SHIM"
+MIREPO="$TMP/mem-infer"; mkdir -p "$MIREPO"
+git -C "$MIREPO" init -q . && git -C "$MIREPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+printf '# Plan\n\nship the thing\n' > "$MIREPO/artifact.md"
+
+# (a) malformed JSON from the model → logged and dropped, zero rows, exit 0
+printf '#!/usr/bin/env bash\necho "this is not json at all"\n' > "$SHIM/claude"
+chmod +x "$SHIM/claude"
+( cd "$MIREPO" && PATH="$SHIM:$PATH" bash "$MEM" ingest --agent product --artifact artifact.md --infer true ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "malformed model output → exit 0" || bad "malformed JSON blocked the run (rc=$RC)"
+grep -q 'err=malformed-json-dropped' "$MIREPO/.team-irfan/memory/memory.log" \
+  && ok "malformed JSON logged as dropped" || bad "malformed JSON not logged"
+N=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" 2>/dev/null)
+[ "${N:-0}" = "0" ] && ok "no rows written from garbage" || bad "garbage produced $N rows"
+
+# (b) valid ops → applied with hash-dedup; the raw payload lands in ingest_log
+cat > "$SHIM/claude" <<'EOF4'
+#!/usr/bin/env bash
+echo '{"result":"[{\"op\":\"ADD\",\"kind\":\"decision\",\"text\":\"retries are capped at two per task\",\"tags\":\"retry\"},{\"op\":\"ADD\",\"kind\":\"decision\",\"text\":\"retries are capped at two per task\",\"tags\":\"retry\"},{\"op\":\"NOOP\"}]"}'
+EOF4
+chmod +x "$SHIM/claude"
+( cd "$MIREPO" && PATH="$SHIM:$PATH" bash "$MEM" ingest --agent product --artifact artifact.md --infer true ) >/dev/null 2>&1
+N=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" 2>/dev/null)
+[ "${N:-0}" = "1" ] && ok "ADD ops applied, duplicate hash-deduped (1 row)" || bad "expected 1 row, got $N"
+IL=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM ingest_log;" 2>/dev/null)
+[ "${IL:-0}" -ge 1 ] && ok "raw ingestion payload kept in ingest_log" || bad "ingest_log empty"
+
+# (c) compact: expired rows retired, the active-row cap enforced
+DB="$MIREPO/.team-irfan/memory/product.db"
+sqlite3 "$DB" "INSERT INTO memories(text,kind,tags,source,created_at,updated_at,expires_at,status,hash)
+  VALUES ('temporary fact','gotcha','t','x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','active','exp1');"
+sqlite3 "$DB" "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 12)
+  INSERT INTO memories(text,kind,tags,source,created_at,updated_at,status,hash)
+  SELECT 'filler fact '||i,'preference','f','x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','active','fill'||i FROM n;"
+( cd "$MIREPO" && TG_MEM_ROW_CAP=5 bash "$MEM" compact --agent product ) >/dev/null 2>&1
+EXP=$(sqlite3 "$DB" "SELECT status FROM memories WHERE hash='exp1';")
+[ "$EXP" = "retired" ] && ok "compact retires expired rows" || bad "expired row still $EXP"
+ACT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE status='active';")
+[ "${ACT:-99}" -le 5 ] && ok "compact enforces the active-row cap ($ACT/5)" || bad "cap ignored: $ACT active"
+grep -qE ' compact product ok .*retires=[1-9]' "$MIREPO/.team-irfan/memory/memory.log" \
+  && ok "compact logged its retires" || bad "compact not logged"
+
+# (d) the extraction contract is fixed and ops-only — prompt text says so
+grep -q 'Return ONLY a JSON array' "$MEM" \
+  && ok "extraction prompt demands JSON ops only" || bad "extraction prompt is loose"
+grep -q 'claude -p --model haiku --output-format json' "$MEM" \
+  && ok "exactly one Haiku call, json output" || bad "infer path not haiku/json"
+# evaluation reads the log and reports memory health
+grep -q 'memory.log' "$TG/agents/evaluation.md" \
+  && ok "evaluation reads memory.log" || bad "evaluation ignores memory.log"
+grep -q 'memory hooks healthy' "$TG/agents/evaluation.md" \
+  && ok "evaluation states a plain memory verdict" || bad "no memory verdict in evaluation"
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo
 echo "────────────────────────────────────────"

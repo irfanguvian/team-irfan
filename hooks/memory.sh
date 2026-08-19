@@ -23,7 +23,7 @@ MEM_DIR="${TG_MEMORY_DIR:-.team-irfan/memory}"
 SQLITE="${TG_SQLITE:-sqlite3}"
 K_DEFAULT=12
 COMPILE_ROWS=40
-ROW_CAP=500
+ROW_CAP="${TG_MEM_ROW_CAP:-500}"   # active rows per db; compact triggers when crossed
 
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now_ms()  { perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || echo $(($(date +%s)*1000)); }
