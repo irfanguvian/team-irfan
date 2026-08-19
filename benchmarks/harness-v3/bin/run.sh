@@ -82,7 +82,7 @@ run_cell() {
   setup_worktree "$task" "$arm" "$round" "$wt"
   echo "$wt" > "$out/worktree.path"
 
-  local start end status=ok
+  local start end status rc=0
   start=$(date +%s)
   (
     cd "$wt"
@@ -94,12 +94,41 @@ run_cell() {
       claude "${flags[@]}" <<< "$prompt"
   ) > "$out/result.json" 2> "$out/stderr.log" &
   local pid=$!
-  ( sleep "$MAX_SEC"; kill -TERM "$pid" 2>/dev/null ) & local killer=$!
-  wait "$pid"; local rc=$?
-  kill "$killer" 2>/dev/null
+  # claude -p prints one final {"type":"result"} object — but plugins (the
+  # OMC daemon) can keep the process alive AFTER that write, so waiting on
+  # the pid alone turns every finished cell into fail(timeout) at MAX_SEC.
+  # Measured: a cell that completed in 113s was recorded 3230s. Poll for the
+  # terminal object instead, then reap the cell's whole tree.
+  status="fail(timeout)"
+  while :; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null; rc=$?
+      status=ok; [ "$rc" -ne 0 ] && status="fail(rc=$rc)"
+      break
+    fi
+    if [ -s "$out/result.json" ] && tail -c 4000 "$out/result.json" | grep -q '"type":"result"'; then
+      status=ok
+      break
+    fi
+    [ $(( $(date +%s) - start )) -ge "$MAX_SEC" ] && break
+    sleep 5
+  done
+  # a terminal object that reports an API error is a failed measurement, not
+  # a result — label it so the retry pass picks it up
+  if [ "$status" = ok ] && tail -c 4000 "$out/result.json" 2>/dev/null \
+       | grep -q '"terminal_reason":"api_error"'; then
+    status="fail(api_error)"
+  fi
+  # reap children and grandchildren (claude + any daemon it spawned)
+  local kids c
+  kids=$(pgrep -P "$pid" 2>/dev/null)
+  for c in $kids; do pkill -TERM -P "$c" 2>/dev/null; done
+  pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null
+  sleep 1
+  for c in $kids; do pkill -KILL -P "$c" 2>/dev/null; done
+  pkill -KILL -P "$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
   end=$(date +%s)
-  [ "$rc" -ne 0 ] && status="fail(rc=$rc)"
-  [ $((end - start)) -ge "$MAX_SEC" ] && status="fail(timeout)"
 
   jq -n --arg t "$task" --arg a "$arm" --arg r "$round" --arg s "$status" \
         --argjson w $((end - start)) --arg wt "$wt" \
@@ -135,4 +164,21 @@ for task in ${TASKS//,/ }; do
     wait "${pids[@]}"
   done
 done
+
+# One automatic re-run for every failed cell (sequential — a failure burst is
+# often transient API/DNS weather, and re-running it in parallel re-creates
+# the burst). TG_BENCH_RETRY=0 disables. A cell failing twice stays failed.
+if [ "${TG_BENCH_RETRY:-1}" != "0" ]; then
+  for task in ${TASKS//,/ }; do
+    for arm in ${ARMS//,/ }; do
+      for r in $(seq 1 "$ROUNDS"); do
+        st=$(jq -r '.status // "missing"' "$H/runs/$task/$arm/$r/meta.json" 2>/dev/null || echo missing)
+        case "$st" in
+          ok) ;;
+          *) echo "=== retry $task/$arm/$r (was: $st) ==="; run_cell "$task" "$arm" "$r" ;;
+        esac
+      done
+    done
+  done
+fi
 echo "done. score with: bin/score.sh all"
