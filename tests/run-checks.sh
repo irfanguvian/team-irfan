@@ -706,8 +706,12 @@ if node -e '
 
   const plugin = JSON.parse(fs.readFileSync(path.join(TG, ".claude-plugin/plugin.json"), "utf8"));
   if (plugin.name !== "team-irfan") fail("plugin.json name is " + plugin.name);
-  if (!plugin.hooks) fail("plugin.json declares no hooks file");
-  const hooksPath = path.join(TG, plugin.hooks);
+  // hooks/hooks.json is auto-loaded by the plugin system; declaring it in
+  // plugin.json again is a duplicate-load error (measured: plugin 3.1.0
+  // failed to load with manifest.hooks set). The manifest must NOT name it.
+  if (plugin.hooks) fail("plugin.json declares hooks — hooks/hooks.json auto-loads; the manifest reference double-loads it");
+  const hooksPath = path.join(TG, "hooks/hooks.json");
+  if (!fs.existsSync(hooksPath)) fail("hooks/hooks.json missing — nothing auto-loads");
   const cfg = JSON.parse(fs.readFileSync(hooksPath, "utf8")).hooks;
 
   const events = Object.keys(cfg).sort();
