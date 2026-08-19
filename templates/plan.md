@@ -58,8 +58,8 @@ hooks/plan-check.sh recomputes every projection; arithmetic is not yours.>
 ```
 budget_cap: 60
 projection_formula: 26 + 27*tasks
-phase 1: <goal>  tasks: [T1,T2]  projected: 80  fits: no
-phase 2: <goal>  tasks: [T3]  projected: 53  fits: yes
+phase 1: <goal>  tasks: [T1]  projected: 53  fits: yes
+phase 2: <goal>  tasks: [T2]  projected: 53  fits: yes
 ```
 
 ## Tasks

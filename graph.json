@@ -5,6 +5,7 @@
   "nodes": [
     { "id": "product",      "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "plan.md + plan.json (draft round: plan.draft.md)" },
     { "id": "plan-gate",    "kind": "command",        "leaf": true, "effect_policy": "side_effect_free", "command": "hooks/plan-gate.sh <run>" },
+    { "id": "plan-check",   "kind": "command",        "leaf": true, "effect_policy": "side_effect_free", "command": "hooks/plan-check.sh <run>" },
     { "id": "gate-plan",    "kind": "human-approval",                                                    "prompt": "approve the plan printed above" },
     { "id": "init",         "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/context/<slug>.md" },
     { "id": "executor",     "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": "change-summary-<id>.md", "fanout": "per-task" },
@@ -15,7 +16,8 @@
   ],
   "edges": [
     ["product", "plan-gate"],
-    ["plan-gate", "gate-plan"],
+    ["plan-gate", "plan-check"],
+    ["plan-check", "gate-plan"],
     ["gate-plan", "init"],
     ["gate-plan", "qa"],
     ["init", "executor"],

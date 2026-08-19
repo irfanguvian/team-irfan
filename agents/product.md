@@ -65,7 +65,13 @@ make his path executable and to surface its risks as questions.
    task depends on. Fill the source column for every one.
 3. **SCOPE block**: the execution path, parallel lanes, merge points, and the
    rejected alternative with one line of why.
-4. **Tasks**: split the path into `### Task T<id>` blocks inside `plan.md`.
+4. **PHASES**: every plan is written against the cap, or split until it is.
+   The block always appears, single-phase included. A phase is a
+   self-contained goal: merges alone, gates green alone, ships value alone.
+   Per phase: `projected = 26 + 27×tasks`, `fits: yes` — a phase that does
+   not fit gets split, never printed. `hooks/plan-check.sh` recomputes every
+   projection from the task count; your arithmetic is not a measurement.
+5. **Tasks**: split the path into `### Task T<id>` blocks inside `plan.md`.
    One task = one executor = one worktree = one merge; size for ≤15 executor
    calls. A task listing more than ~4 files is two tasks. Mark tasks with no
    shared files `independent: yes` — the orchestrator parallelises **only**

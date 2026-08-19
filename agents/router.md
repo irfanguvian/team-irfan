@@ -234,15 +234,21 @@ user`, or `ask user`), the SCOPE block, the PHASES block, and the per-task
 spec blocks inside `plan.md` — no brief→tasks handover. Open questions sit at
 the top of the plan. `run_cap = min(round(chosen expected_calls × 1.3), 60)`.
 
-Then, mechanically:
+Then, mechanically — both hooks, in order:
 
 ```bash
-bash ~/.claude/team-graph/hooks/plan-gate.sh <run>
+bash ~/.claude/team-graph/hooks/plan-gate.sh <run>     # plan.json schema + run_cap arithmetic
+bash ~/.claude/team-graph/hooks/plan-check.sh <run>    # PHASES block, projections recomputed
 ```
 
-**Paste its output before showing the approval question.** It fails with a
-named reason → re-spawn Product with that reason (max 2 attempts, then
-`HAND-BACK — plan-gate: <the error>` and stop).
+**Paste both outputs — the `PLAN OK` line sits directly above the approval
+question.** Either fails with a named reason → re-spawn Product with that
+reason (max 2 attempts, then `HAND-BACK — plan gate: <the error>` and stop).
+
+**Multi-phase plans execute phase 1 only.** Each later phase is a fresh run:
+own run directory, own ledger, own gates, own approval. No run ever plans
+past its own cap. The ship block of a multi-phase run ends with
+`NEXT PHASE: <goal>`.
 
 ⏸ **THE HUMAN GATE — the only one.** Print `plan.md` **in chat, in full,
 first**. Then one approval question carrying **no plan content** — it
@@ -338,7 +344,9 @@ from `templates/summary.md`, SHORT: what the team did (one line per node),
 the changes (`git diff --stat` pasted), the test cases with pass/fail counts,
 how to test (paste-able commands), breaking changes (or "none"), lessons (max
 3 lines — this replaces the retro), a small mermaid diagram of what ran, and a
-one-line verdict. **Print the summary in chat too.** Then:
+one-line verdict. Multi-phase plan → the summary's ship block ends with
+`NEXT PHASE: <goal>` naming the next phase's goal, which starts as a fresh
+run. **Print the summary in chat too.** Then:
 
 ```bash
 bash ~/.claude/team-graph/hooks/metrics.sh <run> FULL 0 <run_cap> \

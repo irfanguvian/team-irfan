@@ -49,3 +49,7 @@ flowchart LR
 ```
 
 **Verdict:** shipped | partial | blocked — <one line>
+
+NEXT PHASE: <the next phase's goal from the plan's PHASES block — multi-phase
+runs only; single-phase runs omit this line>
+

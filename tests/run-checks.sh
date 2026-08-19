@@ -855,6 +855,59 @@ grep -q 'plan-gate.sh' "$TG/agents/router.md" \
   && ok "orchestrator runs plan-gate before the approval question" \
   || bad "nothing ever runs plan-gate.sh"
 
+# ── 25b. plan-check.sh: PHASES parsed, projections recomputed, cap enforced ──
+head2 "25b. plan-check.sh: PHASES parsed, projections recomputed, cap enforced"
+PC="$TG/hooks/plan-check.sh"
+PCRUN="$TMP/plan-check-run"; mkdir -p "$PCRUN"
+
+# a good two-phase plan passes with the PLAN OK line the orchestrator pastes
+cat > "$PCRUN/plan.md" <<'EOF3'
+# Plan — fixture
+
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: ship the endpoint  tasks: [T1]  projected: 53  fits: yes
+phase 2: ship the ui  tasks: [T2]  projected: 53  fits: yes
+
+## Tasks
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'PLAN OK: 2 phases, max projection 53/60' <<< "$OUT" \
+  && ok "good fixture plan → PLAN OK with count and max/cap" || bad "good plan rejected (rc=$RC): $OUT"
+
+# missing PHASES block → bounced to Product
+printf '# Plan\n\n## Tasks\n' > "$PCRUN/plan.md"
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'PHASES block missing' <<< "$OUT" \
+  && ok "missing PHASES block → FAIL, named" || bad "missing block not caught: $OUT"
+
+# a projection the model got wrong is recomputed, not trusted
+cat > "$PCRUN/plan.md" <<'EOF3'
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: ship it  tasks: [T1,T2]  projected: 53  fits: yes
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'projected 53 != recomputed 80' <<< "$OUT" \
+  && ok "wrong projection → FAIL with the recomputed number" || bad "wrong arithmetic accepted: $OUT"
+
+# a phase over the cap fails with the number
+cat > "$PCRUN/plan.md" <<'EOF3'
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: everything at once  tasks: [T1,T2,T3]  projected: 107  fits: yes
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'projected 107 over cap 60' <<< "$OUT" \
+  && ok "over-cap phase → FAIL with the number" || bad "over-cap phase accepted: $OUT"
+
+grep -q 'plan-check.sh' "$TG/agents/router.md" \
+  && ok "orchestrator runs plan-check before the approval question" \
+  || bad "nothing ever runs plan-check.sh"
+
 # ── 26. ledger cap: plan.json run_cap wins, 60 is the fallback ───────────────
 head2 "26. ledger cap: plan.json run_cap wins, 60 is the fallback"
 CRUN="$TMP/cap-run"; mkdir -p "$CRUN"
