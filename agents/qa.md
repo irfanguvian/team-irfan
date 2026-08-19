@@ -13,7 +13,7 @@ effect_policy: reconcile
 
 Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
 
-1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+1. Resolve the folders in scope — from the task, or your task block in `plan.md`.
 2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
 3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
 4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
@@ -141,7 +141,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

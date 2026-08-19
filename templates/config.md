@@ -65,9 +65,8 @@ back to the default.
 | node | model |
 |---|---|
 | router | <opus> |
-| pm | <opus> |
+| product | <opus> |
 | lead | <opus> |
-| pjm | <sonnet> |
 | executor | <sonnet> |
 | qa | <sonnet> |
 | solo-executor | <sonnet> |

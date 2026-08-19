@@ -1,11 +1,9 @@
 {
-  "version": "3.0.0",
+  "version": "3.1.0",
   "orchestrator": "router",
-  "_why": "The FULL pipeline as a checkable artifact instead of an ASCII diagram. A leaf that spawns a node is a topology violation; with the topology written down it is a failing check instead of a 150-call run. v3: one human gate (the plan), a deterministic plan-gate before it, QA blind to the diff, and Lead's review as the machine ship gate. A node may carry `prompt` when its prompt file is shared (lead runs twice: options, review).",
+  "_why": "The FULL pipeline as a checkable artifact instead of an ASCII diagram. A leaf that spawns a node is a topology violation; with the topology written down it is a failing check instead of a 150-call run. v3: one Product node owns product+project+business flow (no brief→tasks handover), one human gate (the plan), a deterministic plan-gate before it, QA blind to the diff, and Lead's review as the machine ship gate. A node appearing twice in time (product: draft then revision) is still one node — the orchestrator referees, the graph stays a DAG.",
   "nodes": [
-    { "id": "pm",           "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "scope.md" },
-    { "id": "lead-options", "kind": "agent",          "prompt": "lead", "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "options.md" },
-    { "id": "pjm",          "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "plan.md + plan.json + task-<id>.md" },
+    { "id": "product",      "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "plan.md + plan.json (draft round: plan.draft.md)" },
     { "id": "plan-gate",    "kind": "command",        "leaf": true, "effect_policy": "side_effect_free", "command": "hooks/plan-gate.sh <run>" },
     { "id": "gate-plan",    "kind": "human-approval",                                                    "prompt": "approve the plan printed above" },
     { "id": "init",         "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/context/<slug>.md" },
@@ -16,9 +14,7 @@
     { "id": "summary",      "kind": "command",        "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/handoffs/<date>-<slug>.md + metrics.json" }
   ],
   "edges": [
-    ["pm", "lead-options"],
-    ["lead-options", "pjm"],
-    ["pjm", "plan-gate"],
+    ["product", "plan-gate"],
     ["plan-gate", "gate-plan"],
     ["gate-plan", "init"],
     ["gate-plan", "qa"],

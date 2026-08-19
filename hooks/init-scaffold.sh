@@ -104,11 +104,10 @@ Grep by \`FEAT:\` \`MOD:\` \`STATUS:\` \`DEC:\` before reading code.
 | node | model |
 |---|---|
 | router | opus |
-| pm | opus |
+| product | opus |
 | lead | opus |
 | init | opus |
 | evaluation | opus |
-| pjm | opus |
 | executor | sonnet |
 | qa | sonnet |
 | solo-executor | sonnet |

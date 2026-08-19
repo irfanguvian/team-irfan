@@ -108,18 +108,19 @@ check_fields() {
   for f in "$@"; do grep -qF "$f" "$file" || missing="$missing '$f'"; done
   [ -z "$missing" ] && ok "$1" || bad "$1 missing:$missing"
 }
-check_fields scope.md          '## Problem' '## Scope in' '## Scope out' '## Open questions' '## Acceptance'
-check_fields task-spec.md      '## Goal' '## Files in scope' '## Acceptance criteria' '## Out of scope' 'independent:'
 check_fields change-summary.md '## What changed' '## Files' '## How to verify' '## Gate output'
 check_fields test-report.md    'verdict:' '## Cases' '## Evidence' '## Bugs found' '## Not covered'
 check_fields report.md         'verdict:' '## Backward compatibility' '## Gate' '## Scope' '## Findings' '**Verdict:**'
-check_fields plan.md           '## Goal' '## Work list' '## Scope' '## Options' '## Chosen option' '## Test contract' '## Open questions for Irfan' '## Run cap'
+# plan.md is the merged Product artifact: it absorbed scope.md (business rules
+# with sources, scope in/out, open questions) and task-spec.md (per-task spec
+# blocks: files in scope, acceptance criteria, independent lanes).
+check_fields plan.md           '## Open questions for Irfan' '## Goal' '## Work list' '## Business rules' '## Scope' '## SCOPE' '## PHASES' '## Tasks' '**Files in scope:**' '**Acceptance criteria:**' 'independent:' '## Test contract' '## Run cap'
 check_fields test-cases.md     'source: plan.json ONLY' 'expect_status' 'expect_body' 'expect_effect' 'chrome-devtools-axi'
 check_fields summary.md        '## What the team did' '## Changes' '## Test cases' '## How to test' '## Breaking changes' '## Lessons' '## What ran' '**Verdict:**'
 
 # ── 4b. every agent contract declares its budget and forbidden list ──────────
 head2 "4b. agent contracts declare budget + forbidden actions"
-for a in router solo-executor pm pjm lead executor qa; do
+for a in router solo-executor product lead executor qa; do
   f="$TG/agents/$a.md"
   if [ ! -f "$f" ]; then bad "$a.md missing"; continue; fi
   grep -q '^budget:' "$f" && grep -q '^## Forbidden' "$f" \
@@ -300,10 +301,9 @@ cd "$FIXTURE" || exit 2
 # ── 12. a killed run is resumable from disk alone ────────────────────────────
 head2 "12. a killed run is resumable from disk alone"
 RUN="$TMP/resume"; mkdir -p "$RUN"
-printf '# brief\n' > "$RUN/brief.md"
-printf '# tasks\n- T1\n- T2\n' > "$RUN/tasks.md"
-bash "$TG/hooks/run-state.sh" "$RUN" pm pjm >/dev/null
-bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+printf '# plan\n' > "$RUN/plan.md"
+printf '{"run_cap":39}\n' > "$RUN/plan.json"
+bash "$TG/hooks/run-state.sh" "$RUN" product exec-1 >/dev/null
 bash "$TG/hooks/retry-guard.sh" "$RUN" T1 >/dev/null
 # simulate the kill: nothing else exists
 
@@ -311,9 +311,9 @@ if node -e '
   const fs=require("fs"), d=process.argv[1];
   const st=JSON.parse(fs.readFileSync(d+"/run-state.json","utf8"));
   const fail=m=>{console.error(m);process.exit(1)};
-  if (!st.completed.includes("pjm")) fail("cannot tell pjm finished");
+  if (!st.completed.includes("product")) fail("cannot tell product finished");
   if (st.current !== "exec-1") fail("cannot tell where to resume");
-  for (const f of st.completed.map(n=>({pm:"brief.md",pjm:"tasks.md"}[n])).filter(Boolean))
+  for (const f of st.completed.map(n=>({product:"plan.md"}[n])).filter(Boolean))
     if (!fs.existsSync(d+"/"+f)) fail("completed node has no artifact: "+f);
   const r=JSON.parse(fs.readFileSync(d+"/retries.json","utf8"));
   if (r.T1 !== 1) fail("retry count did not survive the kill");
@@ -323,10 +323,10 @@ else
   bad "run is not resumable from disk: $(cat "$TMP/rerr")"
 fi
 # re-recording a finished node must not duplicate it
-bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+bash "$TG/hooks/run-state.sh" "$RUN" product exec-1 >/dev/null
 node -e '
   const st=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  process.exit(st.completed.filter(n=>n==="pjm").length === 1 ? 0 : 1);
+  process.exit(st.completed.filter(n=>n==="product").length === 1 ? 0 : 1);
 ' "$RUN/run-state.json" && ok "completed list is idempotent" || bad "resume point duplicates nodes"
 
 grep -q 'run-state.sh' "$TG/agents/router.md" \

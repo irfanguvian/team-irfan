@@ -13,7 +13,7 @@ effect_policy: reconcile
 
 Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
 
-1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+1. Resolve the folders in scope — from the task, or your task block in `plan.md`.
 2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
 3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
 4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
@@ -91,9 +91,9 @@ FAST works in the current tree.
 Everything else. Any of: 3+ files, unknown pattern, schema migration, API
 contract change, multi-surface work, anything you cannot bound confidently.
 
-Route: PjM plan (PM scope + Lead options) → plan-gate → **your approval** →
-executors ∥ QA cases → QA runs per task → merge → Lead review (machine gate) →
-summary → end.
+Route: Product plan → challenger round → plan-gate + plan-check → **your
+approval** → executors ∥ QA cases → QA runs per task → merge → Lead review
+(machine gate) → summary → end.
 
 Budget: **≤60 tool calls until a plan is approved; from approval, the plan's
 own `run_cap`** (`ledger.sh cap <run>` reads it, fallback 60).
@@ -108,8 +108,8 @@ mkdir -p .team-irfan/runs/$(date +%Y%m%d)-<slug>
 path to every downstream node — it is where all state lives. The agents hold
 none.
 
-**All run material lives inside `.team-irfan/`** — plan, task-specs, test
-cases, reports, metrics. Session state, never committed or pushed
+**All run material lives inside `.team-irfan/`** — plan, test cases,
+reports, metrics. Session state, never committed or pushed
 (`.team-irfan/` belongs in `.gitignore` — missing → tell Irfan, do not edit it
 yourself). `.tg-active` stays at repo root — the hooks read it there.
 
@@ -192,7 +192,7 @@ bash ~/.claude/team-graph/hooks/run-state.sh <run> <node-just-finished> <next-no
 ```
 
 ```
-[3/7] pjm done · 2 tasks · budget 12/39
+[1/7] product done · 2 tasks · budget 12/39
 ```
 
 Node, one fact, budget. No prose, no recap of what the node said.
@@ -225,16 +225,14 @@ commits. `<slug>` = the goal in 2–4 kebab-case words. Dirty tree → stop and
 ask. Baseline is optional — no coverage provider, the gate says so and the run
 continues.
 
-**STEP 1 — PLAN.** Three spawns, in order, then a deterministic gate, then the
-one human gate:
+**STEP 1 — PLAN.** One node, then deterministic gates, then the one human
+gate:
 
-1. **PM** (`opus`) → `<run>/scope.md` — scope-in / scope-out / open questions,
-   every rule sourced (`file:line`, `R-id`, or `ask user`). PM holds no gate;
-   its open questions travel into the plan.
-2. **Lead, mode=options** (`opus`) → `<run>/options.md` — 1–3 options, each
-   with approach, files, risk, `expected_calls`; one marked recommended.
-3. **PjM** (`opus`) → `<run>/plan.md` + `<run>/plan.json` + `task-<id>.md`
-   per task. `run_cap = min(round(chosen expected_calls × 1.3), 60)`.
+**Product** (`opus`) → `<run>/plan.md` + `<run>/plan.json`. One node owns
+scope, business rules (every rule sourced: `file:line`, `R-id`, `confirmed by
+user`, or `ask user`), the SCOPE block, the PHASES block, and the per-task
+spec blocks inside `plan.md` — no brief→tasks handover. Open questions sit at
+the top of the plan. `run_cap = min(round(chosen expected_calls × 1.3), 60)`.
 
 Then, mechanically:
 
@@ -243,21 +241,22 @@ bash ~/.claude/team-graph/hooks/plan-gate.sh <run>
 ```
 
 **Paste its output before showing the approval question.** It fails with a
-named reason → re-spawn PjM with that reason (max 2 attempts, then
+named reason → re-spawn Product with that reason (max 2 attempts, then
 `HAND-BACK — plan-gate: <the error>` and stop).
 
 ⏸ **THE HUMAN GATE — the only one.** Print `plan.md` **in chat, in full,
 first**. Then one approval question carrying **no plan content** — it
 references the plan printed above. **Silence is not approval.** Open questions
 in the plan are answered here, in the same exchange. Irfan cuts an item →
-delete its task file, note the cut, recompute nothing unless the option
+delete its task block, note the cut, recompute nothing unless the option
 changed. On approval, the plan's `run_cap` replaces the static 60:
 
 ```bash
 bash ~/.claude/team-graph/hooks/ledger.sh cap <run>    # reads plan.json run_cap, fallback 60
 ```
 
-**Context maps, before any executor:** `tasks` name every in-scope folder;
+**Context maps, before any executor:** the plan's task blocks name every
+in-scope folder;
 `ls .team-irfan/context/` and spawn **Init** (`opus`) for each folder without a
 map — independent folders in one message. A leaf cannot spawn init, so it
 happens here or never. Confirm the files exist on disk.
@@ -269,9 +268,10 @@ happens here or never. Confirm the files exist on disk.
   git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
   ```
   One per task, never shared. The `tg-` prefix stays on the *directory*, never
-  the branch. Spawn executors per the plan — parallel lanes **only** where the
-  task-spec says `independent: yes`; `Depends on:` waits for the dependency to
-  merge.
+  the branch. Spawn executors per the plan — each gets its own `### Task T<id>`
+  block from `plan.md` as its contract, never the whole plan. Parallel lanes
+  **only** where the task block says `independent: yes`; `Depends on:` waits
+  for the dependency to merge.
 - **Simultaneously** spawn **QA, phase=cases** → `<run>/test-cases.md`, from
   `plan.json` ONLY — it must not read any diff or worktree. Backend:
   executable curl cases with status+body assertions. Frontend: browser steps
@@ -321,8 +321,8 @@ from `grep -m1 '^### R-' docs/REGISTRY.md`, under 15 lines. The registry entry
 and the code land in **one commit**. Commit messages: Conventional Commits,
 imperative, ≤72 chars, naming what landed. **No AI attribution trailer** —
 `git log -1` after committing and amend one out if a global setting added it.
-A merge conflict between two tasks means PjM mis-sized them: resolve it, note
-it in the summary's Lessons.
+A merge conflict between two tasks means Product mis-sized them: resolve it,
+note it in the summary's Lessons.
 
 Then spawn **Lead, mode=review** (`opus`) against the MERGED diff only
 (`git diff` against the pre-run base, never whole files) → `<run>/report.md`,
@@ -474,7 +474,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

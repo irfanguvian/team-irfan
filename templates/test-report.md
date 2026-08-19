@@ -7,7 +7,7 @@ verdict: **PASS** | **FAIL**
 
 ## Cases
 
-<derived from task-spec.md acceptance criteria, never from the diff.>
+<derived from the plan task block acceptance criteria, never from the diff.>
 
 | # | Behavior asserted | Result |
 |---|---|---|

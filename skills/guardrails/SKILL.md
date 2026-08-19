@@ -52,7 +52,7 @@ asserts nothing but the mock.
 
 ### Test scenarios come from the plan, never from the diff
 
-Derive cases from `task-spec.md` acceptance criteria. Writing tests by reading
+Derive cases from the plan task block's acceptance criteria. Writing tests by reading
 the implementation produces tests that pass because they mirror the bug.
 
 ### Slop review — mandatory pass after writing tests

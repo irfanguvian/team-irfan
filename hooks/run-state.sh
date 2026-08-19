@@ -5,7 +5,7 @@
 #
 # Writes <run-dir>/run-state.json:
 #
-#   { "completed": ["pm","pjm"], "current": "exec-1" }
+#   { "completed": ["product"], "current": "exec-1" }
 #
 # "Kill any node mid-run and the next one picks up from disk" is the load-bearing
 # claim of the stateless-agent design. Without this file, resume is an inference
