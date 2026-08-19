@@ -3,28 +3,34 @@
   "orchestrator": "router",
   "_why": "The FULL pipeline as a checkable artifact instead of an ASCII diagram. A leaf that spawns a node is a topology violation; with the topology written down it is a failing check instead of a 150-call run. v3: one Product node owns product+project+business flow (no brief→tasks handover), one human gate (the plan), a deterministic plan-gate before it, QA blind to the diff, and Lead's review as the machine ship gate. A node appearing twice in time (product: draft then revision) is still one node — the orchestrator referees, the graph stays a DAG.",
   "nodes": [
-    { "id": "product",      "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "plan.md + plan.json (draft round: plan.draft.md)" },
+    { "id": "product",            "kind": "agent",    "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "plan.md + plan.json (draft round: plan.draft.md)" },
+    { "id": "product-challenger", "kind": "agent",    "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "challenge.md (verdict ACCEPT | REVISE)" },
     { "id": "plan-gate",    "kind": "command",        "leaf": true, "effect_policy": "side_effect_free", "command": "hooks/plan-gate.sh <run>" },
     { "id": "plan-check",   "kind": "command",        "leaf": true, "effect_policy": "side_effect_free", "command": "hooks/plan-check.sh <run>" },
     { "id": "gate-plan",    "kind": "human-approval",                                                    "prompt": "approve the plan printed above" },
     { "id": "init",         "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/context/<slug>.md" },
     { "id": "executor",     "kind": "agent",          "leaf": true, "effect_policy": "idempotent",       "artifact_out": "change-summary-<id>.md", "fanout": "per-task" },
     { "id": "qa",           "kind": "agent",          "leaf": true, "effect_policy": "reconcile",        "artifact_out": "test-cases.md + test-report-<id>.md", "fanout": "per-task" },
+    { "id": "qa-challenger", "kind": "agent",         "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "challenge-qa.md (cases reviewed BEFORE execution)" },
     { "id": "merge",        "kind": "command",        "leaf": true, "effect_policy": "reconcile" },
     { "id": "lead",         "kind": "agent",          "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "report.md (verdict PASS|BLOCKED — the machine ship gate)" },
+    { "id": "lead-challenger", "kind": "agent",       "leaf": true, "effect_policy": "side_effect_free", "artifact_out": "challenge-lead.md (blind re-review; disagreement = blocker)" },
     { "id": "summary",      "kind": "command",        "leaf": true, "effect_policy": "idempotent",       "artifact_out": ".team-irfan/handoffs/<date>-<slug>.md + metrics.json" }
   ],
   "edges": [
-    ["product", "plan-gate"],
+    ["product", "product-challenger"],
+    ["product-challenger", "plan-gate"],
     ["plan-gate", "plan-check"],
     ["plan-check", "gate-plan"],
     ["gate-plan", "init"],
     ["gate-plan", "qa"],
     ["init", "executor"],
     ["executor", "qa"],
-    ["qa", "merge"],
+    ["qa", "qa-challenger"],
+    ["qa-challenger", "merge"],
     ["merge", "lead"],
-    ["lead", "summary"]
+    ["lead", "lead-challenger"],
+    ["lead-challenger", "summary"]
   ],
   "standalone": [
     { "id": "router",        "reason": "the orchestrator itself — owns every edge above" },

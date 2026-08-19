@@ -240,11 +240,28 @@ block → paste nothing. Same command with `--agent lead` before the Lead
 review spawn in step 5. Memory never blocks: a failed retrieve is a skipped
 paste, not a stopped run.
 
-**Product** (`opus`) → `<run>/plan.md` + `<run>/plan.json`. One node owns
-scope, business rules (every rule sourced: `file:line`, `R-id`, `confirmed by
-user`, or `ask user`), the SCOPE block, the PHASES block, and the per-task
-spec blocks inside `plan.md` — no brief→tasks handover. Open questions sit at
-the top of the plan. `run_cap = min(round(chosen expected_calls × 1.3), 60)`.
+**Product** (`opus`) → `<run>/plan.draft.md` + `<run>/plan.json`. One node
+owns scope, business rules (every rule sourced: `file:line`, `R-id`,
+`confirmed by user`, or `ask user`), the SCOPE block, the PHASES block, and
+the per-task spec blocks inside the plan — no brief→tasks handover. Open
+questions sit at the top. `run_cap = min(round(chosen expected_calls × 1.3),
+60)`.
+
+**Challenger round (FULL only — FAST keeps its single quality gate).** Roles
+do not spawn; you spawn the sibling and referee via artifacts:
+
+1. Spawn **product-challenger** (`opus`) on `plan.draft.md` →
+   `<run>/challenge.md`, verdict `ACCEPT` or `REVISE:<items>`. The task
+   already names a solution path → the challenger verifies that path only;
+   goal-without-path → it generates ≥2 alternatives with projections.
+2. `ACCEPT` → `mv <run>/plan.draft.md <run>/plan.md` yourself. `REVISE` →
+   re-spawn **Product** with `challenge.md`; it addresses or rejects each
+   item with a reason and writes the final `plan.md`. **One revision round
+   max** — still disagreeing → print both positions and let Irfan rule at
+   the gate.
+
+Challenger spawns cost calls like every other node — same ledger, no side
+budget. The `26 + 27×tasks` projection already prices them in.
 
 Then, mechanically — both hooks, in order:
 
@@ -295,10 +312,16 @@ happens here or never. Confirm the files exist on disk.
   executable curl cases with status+body assertions. Frontend: browser steps
   via the `chrome-devtools-axi` skill, or a manual checklist that says so.
   `gate.sh` scans the file and fails assertion-free cases.
+- When the cases land, spawn **qa-challenger** (`opus`) on `test-cases.md` +
+  `plan.json` → `<run>/challenge-qa.md`: coverage gaps + missing
+  backward-compat cases from the breaking-change checklist, **before any
+  case executes**. `REVISE` → one QA cases revision round on the named
+  items; still disagreeing → both positions to Irfan.
 
-**STEP 3 — QA RUNS.** When an executor finishes a task, spawn **QA,
-phase=run** against that worktree → `test-report-<id>.md`: each case
-PASS/FAIL with pasted command output as evidence. No narrative verdicts.
+**STEP 3 — QA RUNS.** When an executor finishes a task — and only after the
+qa-challenger round settled the cases — spawn **QA, phase=run** against that
+worktree → `test-report-<id>.md`: each case PASS/FAIL with pasted command
+output as evidence. No narrative verdicts.
 
 **STEP 4 — FIX LOOP, HARD-CAPPED.** On FAIL: hand ONLY the failing cases +
 evidence to the SAME executor in the SAME worktree — not a fresh one, the
@@ -352,6 +375,13 @@ typecheck/lint/tests/build via `gate.sh`, output pasted; no files outside
 `plan.json` `scope_folders`. BLOCKED with a fixable cause → back to the
 executor **within the same retry budget**; otherwise the run stops with the
 report. There is no human sign-off — this verdict is the ship gate.
+
+Then spawn **lead-challenger** (`opus`) on the SAME merged diff —
+**without** `report.md`; the blind re-review is the mechanism →
+`<run>/challenge-lead.md`, verdict PASS or BLOCKED. Compare the two
+verdicts yourself: **any disagreement is an automatic blocker** — print both
+positions, mark the run BLOCKED, hand to Irfan. Agreement on PASS ships;
+agreement on BLOCKED follows the report's path above.
 
 **STEP 6 — SUMMARY.** Write `.team-irfan/handoffs/<yyyy-mm-dd>-<slug>.md`
 from `templates/summary.md`, SHORT: what the team did (one line per node),

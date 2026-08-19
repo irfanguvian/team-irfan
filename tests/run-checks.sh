@@ -120,7 +120,7 @@ check_fields summary.md        '## What the team did' '## Changes' '## Test case
 
 # ── 4b. every agent contract declares its budget and forbidden list ──────────
 head2 "4b. agent contracts declare budget + forbidden actions"
-for a in router solo-executor product lead executor qa; do
+for a in router solo-executor product lead executor qa product-challenger lead-challenger qa-challenger; do
   f="$TG/agents/$a.md"
   if [ ! -f "$f" ]; then bad "$a.md missing"; continue; fi
   grep -q '^budget:' "$f" && grep -q '^## Forbidden' "$f" \
@@ -978,6 +978,44 @@ OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 printf '### CASE-3 — trivial\n- source: plan goal\n- expect_body: expect(true)\n' >> "$QRUN/test-cases.md"
 OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 [ "$RC" -eq 1 ] && ok "expect(true)-style case → GATE FAIL" || bad "expect(true) case passed"
+
+# ── 30. challenger contracts: cheap, side-effect-free, refereed by the star ──
+head2 "30. challenger contracts: ≤5 calls, side_effect_free, verdicts, wired"
+for c in product-challenger lead-challenger qa-challenger; do
+  f="$TG/agents/$c.md"
+  if [ ! -f "$f" ]; then bad "$c.md missing"; continue; fi
+  grep -qE '^budget: ≤5 tool calls' "$f" \
+    && ok "$c budget is ≤5 tool calls" || bad "$c budget line wrong"
+  grep -q '^effect_policy: side_effect_free' "$f" \
+    && ok "$c is side_effect_free" || bad "$c effect_policy wrong"
+  grep -q 'never trees' "$f" \
+    && ok "$c is confined to artifacts + context maps" || bad "$c may read trees"
+done
+grep -q 'ACCEPT | REVISE' "$TG/agents/product-challenger.md" \
+  && ok "product-challenger speaks ACCEPT/REVISE" || bad "product-challenger verdict vocabulary missing"
+grep -q '≥2 alternative' "$TG/agents/product-challenger.md" \
+  && ok "generate mode requires ≥2 alternatives" || bad "no alternative floor in generate mode"
+grep -q 'names a solution path' "$TG/agents/product-challenger.md" \
+  && ok "user-path adoption rule present (verify-only, no alternatives)" \
+  || bad "user-path adoption rule missing from product-challenger"
+grep -q 'do not read Lead' "$TG/agents/lead-challenger.md" || grep -q 'not read Lead' "$TG/agents/lead-challenger.md" \
+  && ok "lead-challenger is blind to report.md" || bad "lead-challenger may read the first review"
+grep -q 'BEFORE any case executes' "$TG/agents/qa-challenger.md" \
+  && ok "qa-challenger reviews cases before execution" || bad "qa-challenger timing rule missing"
+grep -q 'breaking-changes.md' "$TG/agents/qa-challenger.md" \
+  && ok "qa-challenger walks the breaking-change checklist" || bad "qa-challenger ignores the checklist"
+# the orchestrator sequences all three; FAST never sees a challenger
+for c in product-challenger qa-challenger lead-challenger; do
+  grep -q "$c" "$TG/agents/router.md" \
+    && ok "router sequences $c" || bad "router never spawns $c"
+done
+grep -q 'challenger' "$TG/agents/solo-executor.md" \
+  && bad "FAST route mentions challengers — it must keep its single gate" \
+  || ok "FAST route untouched by challengers"
+grep -q 'One revision round' "$TG/agents/router.md" \
+  && ok "one revision round, then Irfan" || bad "revision rounds unbounded"
+grep -q 'same ledger' "$TG/agents/router.md" \
+  && ok "challenger calls counted in the same ledger" || bad "challenger calls escape the ledger"
 
 # ── 29. memory.sh: round-trip, never-blocks, log format, stale flag, inert ───
 head2 "29. memory.sh: deterministic round-trip, never blocks, log line, staleness"
