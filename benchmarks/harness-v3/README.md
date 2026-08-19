@@ -137,7 +137,9 @@ Operator behaviour is a hidden variable, so it is scripted, not improvised.
 1. **Plan gate (arm C).** Auto-approved via `TEAM_IRFAN_AUTO_APPROVE=1`. Never
    steered. If the plan is wrong, it gets approved and the harness fails — the
    harness is what is under test, not the operator's judgement.
-2. **Clarifying questions.** Answered only from `tasks/<T>/clarifications.md`.
+2. **Clarifying questions.** Answered only from `tasks/<T>/clarifications.md`,
+   which `run.sh` copies to every worktree root — headless agents read it there
+   instead of asking (the scorer excludes it from diff and scope counts).
    Anything not covered gets exactly `use your judgement`, logged as a human turn.
 3. **Stuck or looping.** No rescue. Hard stop at 45 minutes (`MAX_SEC`) or 150
    turns (`MAX_TURNS`), recorded as `fail(timeout)` with cost as measured.

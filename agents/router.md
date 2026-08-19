@@ -50,12 +50,16 @@ HAND-BACK — faster manually: <reason>
 Then STOP. Do not run the graph. Do not offer to do it anyway. Do not start
 "just looking". One line, then silence.
 
-Trivial examples: rename one variable, fix one typo, add one log line, bump
-one version string, delete a commented-out block.
+Trivial examples: rename a variable, fix a typo, add a log line, bump a version string.
 
 Ambiguous examples: "make it better", "fix the thing we discussed", a task
 naming a file that does not exist, a task whose acceptance condition you cannot
 state in one sentence.
+
+**Before refusing on ambiguity, check for `clarifications.md` at the repo
+root** — a task can ship Irfan's answers up front. It exists → read it, treat
+its answers as his, and re-triage with them. Refuse only if the ambiguity
+survives the file.
 
 For the ambiguous case, name the missing piece in the reason:
 `HAND-BACK — faster manually: no acceptance criterion; which behavior is wrong?`
@@ -77,6 +81,10 @@ All three hold:
 - touches **≤2 files**
 - follows a **known pattern** already present in this codebase
 - **no schema change and no API-contract change**
+
+A bugfix stating wrong and expected behavior in one sentence ("returns 200,
+should return 400") is FAST: the sentence is the acceptance criterion, and
+locating the file is the executor's first step, not a reason to route FULL.
 
 Route: Solo Executor → `gate.sh` → 4-question report.
 Budget: **≤15 tool calls end to end**, router calls included.
@@ -141,11 +149,9 @@ Each `agents/<node>.md` frontmatter carries `timeout_ms`, `max_attempts` and
 `retry-guard.sh` allows two retries; change one and the checks fail until you
 change the other.
 
-**Why the topology is a star and not a chain.** You are the only context with a
-channel to Irfan. This graph has exactly ONE hard human gate — the plan
-approval — and a subagent physically cannot hold it: it has no way to stop and
-ask. A gate held by a subagent is not a gate, it is an assumption with a
-checkbox. So the gate lives here, and nothing nests.
+**Why a star, not a chain.** You are the only context with a channel to
+Irfan, and the one hard human gate — plan approval — cannot live in a
+subagent: it has no way to stop and ask. The gate lives here, nothing nests.
 
 ## Spawning a node
 
@@ -291,8 +297,11 @@ references the plan printed above. **Silence is not approval.**
 (**Benchmark mode only:** `TEAM_IRFAN_AUTO_APPROVE=1` in the environment —
 set by the harness, never by a person — means the gate is auto-approved
 after the plan is printed: record `human_overrides=auto-approved`, answer
-open questions from the task's clarifications if provided, and continue.
-Without that variable this paragraph does not exist.) Open questions
+open questions from `clarifications.md`, and **do not end the turn** — the
+session is headless, an ended turn is an ended session, and the run scores
+zero. Continue to STEP 2 immediately and keep driving, node after node,
+until the STEP 6 summary is written. Without that variable this paragraph
+does not exist.) Open questions
 in the plan are answered here, in the same exchange. Irfan cuts an item →
 delete its task block, note the cut, recompute nothing unless the option
 changed. On approval, the plan's `run_cap` replaces the static 60:

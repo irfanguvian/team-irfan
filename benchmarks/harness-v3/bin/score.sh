@@ -36,8 +36,11 @@ score_cell() {
   # Agent-runtime bookkeeping is excluded everywhere it would distort a number:
   # OMC writes hundreds of lines of session state into the working directory, and
   # counting it would make the tooling-heavy arms look like they rewrote the repo.
+  # clarifications.md is placed by run.sh before the agent starts — harness
+  # input, not agent output.
   local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json'
-                  ':(exclude).team-irfan' ':(exclude).tg-active')
+                  ':(exclude).team-irfan' ':(exclude).tg-active'
+                  ':(exclude)clarifications.md')
   git -C "$wt" diff --cached -- . "${NOISE[@]}" > "$out/diff.txt"
   git -C "$wt" diff --cached --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
   local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat -- . "${NOISE[@]}" \
@@ -51,7 +54,7 @@ score_cell() {
   local oos=0 oos_list=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue
-    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*|.team-irfan/*|.tg-active) continue ;; esac
+    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*|.team-irfan/*|.tg-active|clarifications.md) continue ;; esac
     local hit=0
     while IFS= read -r pat; do
       [ -z "$pat" ] && continue

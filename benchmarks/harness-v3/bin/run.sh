@@ -80,6 +80,10 @@ run_cell() {
 
   mkdir -p "$out" "$WT_ROOT"
   setup_worktree "$task" "$arm" "$round" "$wt"
+  # Every arm gets the pre-answered interview at the worktree root, byte for
+  # byte — headless runs have no operator to answer clarifying questions, and
+  # refusal-on-ambiguity would otherwise be a forfeit. score.sh excludes it.
+  cp "$H/tasks/$task/clarifications.md" "$wt/clarifications.md" 2>/dev/null || true
   echo "$wt" > "$out/worktree.path"
 
   local start end status rc=0

@@ -1277,6 +1277,27 @@ grep -q 'TG_BENCH_MODEL' "$TG/agents/router.md" \
 grep -q 'TG_BENCH_MODEL' "$TG/benchmarks/harness-v3/README.md" \
   && ok "harness README documents the matrix override" || bad "TG_BENCH_MODEL undocumented"
 
+# ── 34. headless reliability: the 2026-08-19 haiku run's three failure modes ─
+# T3 forfeited 3/3 (refused with answers shipped), T2 stalled 3/3 at an
+# auto-approved gate, T1 mis-routed a one-liner FULL. These pins hold the fixes.
+head2 "34. headless: clarifications consumed, auto-approve keeps driving, 1-sentence bugfix is FAST"
+grep -q 'refusing on ambiguity, check for' "$TG/agents/router.md" \
+  && ok "router reads shipped clarifications before HAND-BACK" \
+  || bad "router can refuse a task that shipped its answers (T3 failure mode)"
+grep -q 'do not end the turn' "$TG/agents/router.md" \
+  && ok "auto-approved gate forbids ending the turn" \
+  || bad "auto-approve can still stall at the gate (T2 failure mode)"
+grep -q 'the sentence is the acceptance criterion' "$TG/agents/router.md" \
+  && ok "one-sentence bugfix pinned to FAST" \
+  || bad "FAST rubric lost the one-sentence-bugfix rule (T1 mis-triage)"
+grep -q 'clarifications.md' "$TG/benchmarks/harness-v3/bin/run.sh" \
+  && ok "harness ships clarifications.md into every worktree" \
+  || bad "headless arms have no way to read the task's answers"
+CLAR=$(grep -c 'clarifications\.md' "$TG/benchmarks/harness-v3/bin/score.sh" || true)
+[ "${CLAR:-0}" -ge 2 ] \
+  && ok "scorer excludes clarifications.md from diff and scope counts" \
+  || bad "harness-placed clarifications.md would score as an agent edit"
+
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo
 echo "────────────────────────────────────────"
