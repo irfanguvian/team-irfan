@@ -182,6 +182,17 @@ prevents data loss, security measures, accessibility basics.
 Always solve with backward compatibility first. A breaking change discovered
 mid-task stops the node and escalates — it is not an implementation detail.
 
+**Rule A — old tests are a contract.** A pre-existing unit test failing under
+new work is a backward-compat break by definition. The executor stops and
+either restores compatibility or flags `INTENTIONAL BREAKING: <what>` — valid
+only if the approved plan already declares that change. Neither executors nor
+QA may edit an existing test to make new work pass.
+
+**Checklist B.** The static breaking-change checklist lives in
+`breaking-changes.md` beside this file. Executors walk it before
+`change-summary.md`; qa-challenger walks it against the plan; Lead treats an
+undeclared hit as a blocker, never a footnote.
+
 ## 10. Environment
 
 - Docker port bindings are localhost only: `-p 127.0.0.1:PORT:PORT`. Never

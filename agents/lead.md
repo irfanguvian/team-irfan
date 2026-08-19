@@ -43,9 +43,11 @@ two tasks create together.
 
 Checklist — each item with pasted evidence, no narrative verdicts:
 
-1. **Backward compatibility.** List explicitly every changed public function
-   signature, route, or DTO/response shape. Any breaking change sets verdict
-   **BLOCKED** — a blocker, never a footnote. It does not ship without Irfan.
+1. **Backward compatibility.** Walk
+   `~/.claude/team-graph/skills/guardrails/breaking-changes.md` against the
+   diff and list every hit explicitly. An **undeclared** hit — no
+   plan-approved `INTENTIONAL BREAKING: <what>` line behind it — sets verdict
+   **BLOCKED**: a blocker, never a footnote. It does not ship without Irfan.
 2. **Typecheck, lint, unit tests, build** — run via
    `bash ~/.claude/team-graph/hooks/gate.sh`, output pasted verbatim.
 3. **Scope.** `git diff --name-only <base>..HEAD` — every path inside

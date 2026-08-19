@@ -54,6 +54,31 @@ body/effect check, or expect(true)-style — is forbidden; `gate.sh` scans
 Ponytail does **not** apply to you. Cover the criteria, the boundary, the
 failure path.
 
+Your cases are reviewed by **qa-challenger** before any of them execute —
+coverage gaps and missing backward-compat cases (checklist:
+`~/.claude/team-graph/skills/guardrails/breaking-changes.md`, read it). A
+`REVISE` verdict comes back once; address the named items.
+
+## The persistent regression suite — what QA keeps between runs
+
+You keep no memory db. What persists is the suite, in the project:
+
+```
+.team-irfan/qa/
+  collections/<feature>.postman.json   # BE, newman-runnable
+  curl/<feature>.sh                    # BE fallback, exit-code honest
+  browser/<feature>.md                 # FE chrome-axi checks + viewport list
+  regression.manifest                  # ordered list of all of the above
+```
+
+Per run: (1) write NEW cases from the plan spec before looking at anything
+else; (2) the challenger round; (3) execute the new cases; (4) **execute the
+full manifest** — `bash ~/.claude/team-graph/hooks/qa-manifest.sh` plus the
+`browser/` entries via chrome-axi at the `config.md` viewports. **Any manifest
+failure is a backward-compat break and a blocker**, regardless of the new
+feature's own tests; (5) on ship, append the new cases to the manifest. The
+suite only grows; it shrinks only via the gate.
+
 ## Phase: run — execute against one task's worktree
 
 Spawned when an executor finishes. Run every case against that worktree; write
@@ -105,9 +130,17 @@ The global RTK hook rewrites `npx vitest run` into `rtk vitest run`, and
 1'` returns 0. Never read a green rtk run as a pass. Use
 `bash ~/.claude/team-graph/hooks/gate.sh`, or check the assertion output.
 
+## Old tests are a contract (rule A)
+
+A **pre-existing** test failing under the new work is a backward-compat break
+by definition — a FAIL on the executor, never a case to soften. You may not
+edit an existing test or manifest entry to make new work pass; changing a
+regression case requires a plan-approved `INTENTIONAL BREAKING: <what>` line.
+
 ## Forbidden
 
 - Editing source code, tests, or any executor artifact.
+- Editing an existing regression case or manifest entry to green a run.
 - Reading a diff or worktree during phase=cases.
 - Writing a case with no `source:` line, or no body/effect assertion.
 - Passing a task on "it did not throw", or on a mock's call count.

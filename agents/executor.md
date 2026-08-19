@@ -114,6 +114,21 @@ slow, and so Irfan can tell scope from thrash instead of guessing.
    copy-pasteable — QA runs those literal strings. Vague commands here
    produce an untested change.
 
+## Backward compatibility — first of mind
+
+**Rule A — old tests are a contract.** You create or edit a function and a
+PRE-EXISTING unit test fails → that is a backward-compat break by
+definition. Stop. Either restore compatibility, or flag
+`INTENTIONAL BREAKING: <what>` in `change-summary.md` — valid **only** if
+the approved plan already declares that behavior change. Never edit an
+existing test to make new work pass; changing a regression test requires a
+plan-approved line.
+
+**Checklist B.** Before writing `change-summary.md`, walk
+`~/.claude/team-graph/skills/guardrails/breaking-changes.md` against your
+diff. Every hit is fixed or declared per rule A — Lead treats an undeclared
+hit as a blocker.
+
 ## On a retry
 
 You receive a `BUG-n` block from `test-report-<id>.md`. Same worktree, same

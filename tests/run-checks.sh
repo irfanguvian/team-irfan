@@ -979,6 +979,66 @@ printf '### CASE-3 — trivial\n- source: plan goal\n- expect_body: expect(true)
 OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 [ "$RC" -eq 1 ] && ok "expect(true)-style case → GATE FAIL" || bad "expect(true) case passed"
 
+# ── 31. backward compat: checklist shipped, rule A stated, manifest honest ───
+head2 "31. backward compat: checklist shipped, rule A stated, manifest honest"
+BC="$TG/skills/guardrails/breaking-changes.md"
+if [ -f "$BC" ]; then
+  ok "breaking-changes.md exists"
+  for h in '## Request contract' '## Response contract' '## Endpoints / routes' '## Code level' '## Data layer' '## Events / queues / jobs' '## Frontend'; do
+    grep -qF "$h" "$BC" && ok "checklist section $h" || bad "checklist missing $h"
+  done
+  grep -q 'INTENTIONAL BREAKING' "$BC" \
+    && ok "checklist names the declaration escape hatch" || bad "no INTENTIONAL BREAKING rule"
+else
+  bad "skills/guardrails/breaking-changes.md missing"
+fi
+# the checklist is loaded by the right agents — executor+QA+lead and both
+# reviewing challengers; a checklist nobody reads is a wish
+for a in executor qa lead qa-challenger lead-challenger; do
+  grep -q 'breaking-changes.md' "$TG/agents/$a.md" \
+    && ok "$a loads the breaking-change checklist" || bad "$a never reads the checklist"
+done
+# rule A: old tests are a contract — executor and QA both carry the block
+grep -q 'INTENTIONAL BREAKING' "$TG/agents/executor.md" \
+  && ok "executor carries rule A" || bad "executor missing rule A"
+grep -q 'INTENTIONAL BREAKING' "$TG/agents/qa.md" \
+  && ok "qa carries rule A" || bad "qa missing rule A"
+grep -q 'Rule A' "$TG/skills/guardrails/SKILL.md" \
+  && ok "guardrails skill carries rule A" || bad "guardrails missing rule A"
+
+# qa-manifest.sh: exit-code honest in both directions
+QM="$TG/hooks/qa-manifest.sh"
+QD="$TMP/qa-suite"; mkdir -p "$QD/curl" "$QD/browser"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$QD/curl/good.sh"
+printf '# manual: open the page\n' > "$QD/browser/home.md"
+printf 'curl/good.sh\nbrowser/home.md\n' > "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'REGRESSION PASS: 1 run, 1 skipped' <<< "$OUT" \
+  && ok "passing manifest → REGRESSION PASS with counts" || bad "green manifest failed (rc=$RC): $OUT"
+printf '#!/usr/bin/env bash\necho boundary case broke\nexit 1\n' > "$QD/curl/bad.sh"
+printf 'curl/bad.sh\n' >> "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'REGRESSION FAIL' <<< "$OUT" && grep -q 'curl/bad.sh' <<< "$OUT" \
+  && ok "failing entry → REGRESSION FAIL naming it" || bad "red manifest passed (rc=$RC)"
+printf 'curl/vanished.sh\n' > "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'MISSING' <<< "$OUT" \
+  && ok "manifest entry with no file → FAIL, loud" || bad "shrunken suite passed silently"
+OUT=$(bash "$QM" "$TMP/no-such-qa-dir" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "no manifest → exit 0, nothing to run" || bad "absent manifest blocked (rc=$RC)"
+grep -q 'qa-manifest.sh' "$TG/agents/qa.md" \
+  && ok "qa runs the manifest" || bad "nothing ever runs the regression manifest"
+grep -q 'regression.manifest' "$TG/agents/router.md" \
+  && ok "orchestrator confirms the ship-time append" || bad "manifest never grows on ship"
+
+# the fixture's second endpoint — the compat trap's substrate
+[ -f "$FIXTURE/src/checkout.ts" ] && [ -f "$FIXTURE/src/checkout.test.ts" ] \
+  && ok "fixture second endpoint (checkout) exists with its contract test" \
+  || bad "fixture second endpoint missing — compat trap has no substrate"
+grep -q "from './cart.js'" "$FIXTURE/src/checkout.ts" 2>/dev/null \
+  && ok "second endpoint depends on the first — a cart change can break it" \
+  || bad "checkout does not depend on cart; the trap cannot spring"
+
 # ── 30. challenger contracts: cheap, side-effect-free, refereed by the star ──
 head2 "30. challenger contracts: ≤5 calls, side_effect_free, verdicts, wired"
 for c in product-challenger lead-challenger qa-challenger; do

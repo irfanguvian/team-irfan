@@ -356,6 +356,11 @@ Landed → skip. Squashed but not committed → finish the commit, do not squash
 again. `--squash` collapses one worktree's own commits and nothing else —
 separate work stays a separate commit, never one mega-commit.
 
+**On ship, QA's new cases join the persistent suite**: confirm QA appended
+them to `.team-irfan/qa/regression.manifest` (files under
+`.team-irfan/qa/{curl,collections,browser}/`). The suite only grows — the
+next run executes it whole, and any failure there is a compat break.
+
 **Before the last task's commit, update `docs/REGISTRY.md` and stage it with
 that commit** — one entry per feature, newest-first below the Index, number
 from `grep -m1 '^### R-' docs/REGISTRY.md`, under 15 lines. The registry entry
