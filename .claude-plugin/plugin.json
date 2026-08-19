@@ -1,7 +1,7 @@
 {
   "name": "team-irfan",
   "description": "team-irfan agent graph — deterministic quality gate and tool-call ledger, armed only inside a .tg-active run",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "author": {
     "name": "irfanguvian"
   }
