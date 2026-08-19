@@ -36,7 +36,8 @@ score_cell() {
   # Agent-runtime bookkeeping is excluded everywhere it would distort a number:
   # OMC writes hundreds of lines of session state into the working directory, and
   # counting it would make the tooling-heavy arms look like they rewrote the repo.
-  local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json')
+  local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json'
+                  ':(exclude).team-irfan' ':(exclude).tg-active')
   git -C "$wt" diff --cached -- . "${NOISE[@]}" > "$out/diff.txt"
   git -C "$wt" diff --cached --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
   local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat -- . "${NOISE[@]}" \
@@ -50,7 +51,7 @@ score_cell() {
   local oos=0 oos_list=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue
-    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*) continue ;; esac
+    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*|.team-irfan/*|.tg-active) continue ;; esac
     local hit=0
     while IFS= read -r pat; do
       [ -z "$pat" ] && continue
@@ -89,6 +90,26 @@ score_cell() {
   fi
   if [ "$regression" = fail ] || [ "$guard" != ok ]; then pass_rate=0; fi
 
+  # 5b. correctness — one deterministic quality verdict per cell -----------
+  # Folds the measured signals into a label a human can scan. The diff the
+  # agent generated is beside it in diff.txt — the verdict says how good it
+  # was, the diff shows what it actually did.
+  #   cheated         edited a protected test (both traps defused that way)
+  #   broken          regression suite/build/lint red, or zero acceptance
+  #   partial         some hidden acceptance tests pass
+  #   correct-sloppy  fully correct but touched out-of-scope files
+  #   correct         fully correct, in scope
+  #   declined        empty diff — the agent refused or never executed
+  local correctness
+  if   [ "$guard" != ok ];            then correctness=cheated
+  elif [ "${diff_loc:-0}" = 0 ] && [ "$passed" = 0 ]; then correctness=declined
+  elif [ "$regression" = fail ];      then correctness=broken
+  elif [ "$total" -gt 0 ] && [ "$passed" = "$total" ]; then
+    if [ "$oos" -gt 0 ]; then correctness=correct-sloppy; else correctness=correct; fi
+  elif [ "$passed" -gt 0 ];           then correctness=partial
+  else                                     correctness=broken
+  fi
+
   # 6. cost and tokens -----------------------------------------------------
   "$H/bin/collect.sh" "$task" "$arm" "$round" > "$out/metrics.json"
 
@@ -97,19 +118,19 @@ score_cell() {
   jq -r --arg task "$task" --arg arm "$arm" --arg round "$round" \
         --arg pr "$pass_rate" --arg passed "$passed" --arg total "$total" \
         --arg reg "$regression" --arg guard "$guard" --arg oos "$oos" \
-        --arg dl "$diff_loc" --arg st "$status" '
+        --arg dl "$diff_loc" --arg st "$status" --arg cor "$correctness" '
     [$task,$arm,$round,$pr,$passed,$total,$reg,$guard,
      (.cost_usd|tostring),(.tokens_in|tostring),(.tokens_out|tostring),
      (.cache_read|tostring),(.cache_write|tostring),(.tool_calls|tostring),
-     (.wall_sec|tostring),$oos,$dl,(.num_turns|tostring),$st] | @csv
+     (.wall_sec|tostring),$oos,$dl,(.num_turns|tostring),$st,$cor] | @csv
   ' "$out/metrics.json" >> "$CSV"
 
-  echo "[$task/$arm/$round] pass=$passed/$total regression=$regression guard=$guard oos=$oos"
+  echo "[$task/$arm/$round] pass=$passed/$total regression=$regression guard=$guard oos=$oos correctness=$correctness"
 }
 
 mkdir -p "$H/runs"
 if [ ! -s "$CSV" ]; then
-  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status' > "$CSV"
+  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status,correctness' > "$CSV"
 fi
 
 if [ "${1:-}" = "all" ]; then

@@ -287,7 +287,12 @@ past its own cap. The ship block of a multi-phase run ends with
 
 ⏸ **THE HUMAN GATE — the only one.** Print `plan.md` **in chat, in full,
 first**. Then one approval question carrying **no plan content** — it
-references the plan printed above. **Silence is not approval.** Open questions
+references the plan printed above. **Silence is not approval.**
+(**Benchmark mode only:** `TEAM_IRFAN_AUTO_APPROVE=1` in the environment —
+set by the harness, never by a person — means the gate is auto-approved
+after the plan is printed: record `human_overrides=auto-approved`, answer
+open questions from the task's clarifications if provided, and continue.
+Without that variable this paragraph does not exist.) Open questions
 in the plan are answered here, in the same exchange. Irfan cuts an item →
 delete its task block, note the cut, recompute nothing unless the option
 changed. On approval, the plan's `run_cap` replaces the static 60:
