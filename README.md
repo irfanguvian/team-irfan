@@ -44,10 +44,12 @@ ledger — in one step, no `settings.json` editing. In Claude Code:
 /plugin install team-irfan@team-irfan
 ```
 
-The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. Both hooks
-stay **inert without a `.tg-active` marker** in the working directory, exactly
-as in the manual install below — installing the plugin changes nothing for any
-other workflow.
+The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. It wires
+the SubagentStop quality gate, the PostToolUse ledger, and the memory hooks
+(`hooks/memory.sh` on SubagentStop/Stop for ingest, SessionStart for the
+compiled-view load). Every hook stays **inert without a `.tg-active` marker**
+in the working directory, exactly as in the manual install below — installing
+the plugin changes nothing for any other workflow.
 
 Register the slash commands — create `~/.claude/commands/team-irfan.md`:
 

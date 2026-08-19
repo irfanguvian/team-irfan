@@ -692,11 +692,13 @@ fi
 mv src/cart.test.ts.bak src/cart.test.ts
 rm -f .tg-active
 
-# ── 23. plugin manifest wires exactly the two documented hooks ───────────────
+# ── 23. plugin manifest wires exactly the documented hooks ───────────────────
 # The plugin exists to replace the manual settings.json edit, not to widen it:
-# exactly two events, each pointing at a script that exists and that the README
-# install section names. A third event or a relocated script is drift.
-head2 "23. plugin manifest: two events, real scripts, same ones README names"
+# exactly four events (v3 adds memory ingest on SubagentStop/Stop and the
+# compiled-view load on SessionStart), each command pointing at a script that
+# exists and that the README install section names. A fifth event or a
+# relocated script is drift.
+head2 "23. plugin manifest: four events, real scripts, same ones README names"
 if node -e '
   const fs = require("fs"), path = require("path");
   const TG = process.argv[1];
@@ -709,27 +711,34 @@ if node -e '
   const cfg = JSON.parse(fs.readFileSync(hooksPath, "utf8")).hooks;
 
   const events = Object.keys(cfg).sort();
-  if (events.join(",") !== "PostToolUse,SubagentStop")
-    fail("expected exactly PostToolUse,SubagentStop — got " + events.join(","));
+  if (events.join(",") !== "PostToolUse,SessionStart,Stop,SubagentStop")
+    fail("expected exactly PostToolUse,SessionStart,Stop,SubagentStop — got " + events.join(","));
 
+  // per event: the exact ordered command tails. subagent-gate stays FIRST on
+  // SubagentStop — the quality gate must run before memory ingests anything.
   const WANT = {
-    PostToolUse:  "hooks/ledger.sh hook",
-    SubagentStop: "hooks/subagent-gate.sh",
+    PostToolUse:  ["hooks/ledger.sh hook"],
+    SubagentStop: ["hooks/subagent-gate.sh", "hooks/memory.sh hook subagent-stop"],
+    Stop:         ["hooks/memory.sh hook stop"],
+    SessionStart: ["hooks/memory.sh hook session-start"],
   };
   const readme = fs.readFileSync(path.join(TG, "README.md"), "utf8");
-  for (const [event, tail] of Object.entries(WANT)) {
+  for (const [event, tails] of Object.entries(WANT)) {
     const cmds = cfg[event].flatMap(m => m.hooks).map(h => h.command);
-    if (cmds.length !== 1) fail(event + " registers " + cmds.length + " commands, expected 1");
-    const cmd = cmds[0];
-    if (!cmd.startsWith("bash ${CLAUDE_PLUGIN_ROOT}/"))
-      fail(event + " command does not use ${CLAUDE_PLUGIN_ROOT}: " + cmd);
-    if (!cmd.endsWith(tail)) fail(event + " command is not " + tail + ": " + cmd);
-    const script = tail.split(" ")[0];
-    if (!fs.existsSync(path.join(TG, script))) fail(tail + " points at a missing script");
-    if (!readme.includes(script)) fail("README install section does not name " + script);
+    if (cmds.length !== tails.length)
+      fail(event + " registers " + cmds.length + " commands, expected " + tails.length);
+    tails.forEach((tail, i) => {
+      const cmd = cmds[i];
+      if (!cmd.startsWith("bash ${CLAUDE_PLUGIN_ROOT}/"))
+        fail(event + " command does not use ${CLAUDE_PLUGIN_ROOT}: " + cmd);
+      if (!cmd.endsWith(tail)) fail(event + "[" + i + "] command is not " + tail + ": " + cmd);
+      const script = tail.split(" ")[0];
+      if (!fs.existsSync(path.join(TG, script))) fail(tail + " points at a missing script");
+      if (!readme.includes(script)) fail("README install section does not name " + script);
+    });
   }
 ' "$TG" 2>"$TMP/perr"; then
-  ok "plugin.json → hooks.json: PostToolUse=ledger, SubagentStop=gate, nothing else"
+  ok "plugin.json → hooks.json: ledger, gate+memory, stop-ingest, session-load — nothing else"
 else
   bad "plugin manifest invalid: $(cat "$TMP/perr")"
 fi
@@ -742,7 +751,7 @@ head2 "24. doctor.sh: healthy install PASSes, broken install names the failure"
 
 # (a) synthetic registration file carrying both hooks → every line PASS, exit 0
 GOOD="$TMP/doctor-good.json"
-printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bash x/hooks/ledger.sh hook"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$GOOD"
+printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bash x/hooks/ledger.sh hook"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"},{"type":"command","command":"bash x/hooks/memory.sh hook subagent-stop"}]}]}}\n' > "$GOOD"
 OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$GOOD" 2>&1); RC=$?
 [ "$RC" -eq 0 ] && grep -q 'DOCTOR PASS' <<< "$OUT" && ! grep -q '^  FAIL' <<< "$OUT" \
   && ok "healthy install → all PASS, DOCTOR PASS, exit 0" \
@@ -751,7 +760,7 @@ OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$GOOD" 2>&1); RC=$?
 # (b) same file with the PostToolUse/ledger entry removed → a FAIL line naming
 # the ledger hook, non-zero exit
 BADF="$TMP/doctor-bad.json"
-printf '{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$BADF"
+printf '{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"},{"type":"command","command":"bash x/hooks/memory.sh hook subagent-stop"}]}]}}\n' > "$BADF"
 OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$BADF" 2>&1); RC=$?
 [ "$RC" -ne 0 ] && ok "unwired ledger → exit $RC (non-zero)" || bad "doctor passed a broken install"
 grep -q 'FAIL  ledger hook' <<< "$OUT" \
@@ -969,6 +978,88 @@ OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 printf '### CASE-3 — trivial\n- source: plan goal\n- expect_body: expect(true)\n' >> "$QRUN/test-cases.md"
 OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 [ "$RC" -eq 1 ] && ok "expect(true)-style case → GATE FAIL" || bad "expect(true) case passed"
+
+# ── 29. memory.sh: round-trip, never-blocks, log format, stale flag, inert ───
+head2 "29. memory.sh: deterministic round-trip, never blocks, log line, staleness"
+MEM="$TG/hooks/memory.sh"
+MREPO="$TMP/memrepo"; mkdir -p "$MREPO/src"
+git -C "$MREPO" init -q .
+echo 'export const a = 1' > "$MREPO/src/rates.ts"
+git -C "$MREPO" add -A && git -C "$MREPO" -c user.name=t -c user.email=t@t commit -qm base
+printf 'domain_rule|billing|src/rates.ts:1|invoices are charged in integer minor units\nbuild_behavior|test|init|`npm test` needs the fixture db up first\n# a comment\nnotakind|x|y|must be skipped\n' > "$MREPO/seed.txt"
+
+# ingest → retrieve round-trip on a fixture db
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false --source init ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "ingest exits 0" || bad "ingest rc=$RC"
+[ -f "$MREPO/.team-irfan/memory/product.db" ] && ok "product.db created" || bad "no product.db"
+OUT=$( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "how are invoices charged" )
+grep -q 'integer minor units' <<< "$OUT" \
+  && ok "retrieve finds the ingested fact by BM25" || bad "round-trip lost the fact: $OUT"
+grep -q '## MEMORY (retrieved, read-only' <<< "$OUT" \
+  && ok "retrieval block carries the read-only header" || bad "MEMORY header missing"
+grep -q 'must be skipped' <<< "$OUT" && bad "unknown kind ingested" || ok "unknown kind skipped"
+
+# hash dedup: ingesting the same artifact twice adds nothing
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false --source init ) >/dev/null 2>&1
+DUP=$( sqlite3 "$MREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" )
+[ "$DUP" = "2" ] && ok "hash dedup: re-ingest adds 0 rows (2 total)" || bad "dedup failed: $DUP rows"
+
+# compiled always-load view regenerated on ingest
+grep -q 'integer minor units' "$MREPO/.team-irfan/memory/product.md" 2>/dev/null \
+  && ok "compiled view product.md regenerated on ingest" || bad "compiled view missing/stale"
+
+# log-line format: every operation appends exactly the documented shape
+if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z (ingest|retrieve|compile|compact|refresh) (product|lead|all) (ok|error) adds=[0-9]+ updates=[0-9]+ retires=[0-9]+ hits=[0-9]+ stale=[0-9]+ ms=[0-9]+( err=\S+)?$' \
+  "$MREPO/.team-irfan/memory/memory.log"; then
+  ok "memory.log lines match the documented format"
+else
+  bad "memory.log format wrong: $(head -2 "$MREPO/.team-irfan/memory/memory.log" 2>/dev/null)"
+fi
+grep -qE ' ingest product ok adds=2 ' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "first ingest logged adds=2" || bad "adds count not logged"
+
+# stale flagging: change the source file, retrieve again → [maybe-stale]
+echo 'export const a = 2' > "$MREPO/src/rates.ts"
+git -C "$MREPO" add -A && git -C "$MREPO" -c user.name=t -c user.email=t@t commit -qm change
+OUT=$( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "invoices minor units" )
+grep -q '\[maybe-stale\] \[domain_rule\]' <<< "$OUT" \
+  && ok "row with a changed source file gets [maybe-stale]" || bad "staleness not flagged: $OUT"
+grep -qE ' retrieve product ok .*stale=[1-9]' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "stale count reaches the log" || bad "stale=0 logged despite the flag"
+
+# never-blocks: a corrupted db still exits 0, with the error in the log
+printf 'garbage' > "$MREPO/.team-irfan/memory/product.db"
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "corrupted db → ingest still exits 0" || bad "memory blocked the run (rc=$RC)"
+( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "anything" ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "corrupted db → retrieve still exits 0" || bad "retrieve blocked (rc=$RC)"
+grep -qE ' (ingest|retrieve) product error .* err=' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "failure path logged with err=" || bad "silent failure — log has no error line"
+
+# unknown agent: memory is Product + Lead only, and still never blocks
+( cd "$MREPO" && bash "$MEM" ingest --agent qa --artifact seed.txt --infer false ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && [ ! -f "$MREPO/.team-irfan/memory/qa.db" ] \
+  && ok "qa gets no memory db, exit 0" || bad "qa.db created or blocked (rc=$RC)"
+
+# hook mode is inert without .tg-active — the load-bearing v2 invariant
+MHOOK="$TMP/memhook"; mkdir -p "$MHOOK"
+( cd "$MHOOK" && echo '{}' | bash "$MEM" hook subagent-stop ) ; RC=$?
+[ "$RC" -eq 0 ] && [ ! -d "$MHOOK/.team-irfan" ] \
+  && ok "hook inert with no .tg-active" || bad "memory hook fired outside a run (rc=$RC)"
+
+# retrieval injection is wired: the orchestrator retrieves before the spawn
+grep -q 'memory.sh retrieve --agent product' "$TG/agents/router.md" \
+  && ok "orchestrator retrieves product memory pre-spawn" || bad "product retrieval never wired"
+grep -q 'memory.sh retrieve --agent lead' "$TG/agents/router.md" \
+  && ok "orchestrator retrieves lead memory pre-spawn" || bad "lead retrieval never wired"
+grep -q 'init-lead' "$TG/agents/init.md" \
+  && ok "init seeds lead memory by running commands" || bad "init never seeds lead memory"
+grep -q 'ingest --agent product' "$TG/agents/init.md" \
+  && ok "init seeds product memory from the domain read" || bad "init never seeds product memory"
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

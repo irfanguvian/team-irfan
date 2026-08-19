@@ -10,7 +10,22 @@
     "SubagentStop": [
       {
         "hooks": [
-          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/subagent-gate.sh" }
+          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/subagent-gate.sh" },
+          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/memory.sh hook subagent-stop" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/memory.sh hook stop" }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/memory.sh hook session-start" }
         ]
       }
     ]

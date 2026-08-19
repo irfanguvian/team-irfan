@@ -226,7 +226,19 @@ ask. Baseline is optional — no coverage provider, the gate says so and the run
 continues.
 
 **STEP 1 — PLAN.** One node, then deterministic gates, then the one human
-gate:
+gate.
+
+**Memory, before the spawn** (Product and Lead only — QA and executors get
+none):
+
+```bash
+bash ~/.claude/team-graph/hooks/memory.sh retrieve --agent product --query "<the task text>" --k 12
+```
+
+Paste the returned `## MEMORY` block into the spawn prompt verbatim. Empty
+block → paste nothing. Same command with `--agent lead` before the Lead
+review spawn in step 5. Memory never blocks: a failed retrieve is a skipped
+paste, not a stopped run.
 
 **Product** (`opus`) → `<run>/plan.md` + `<run>/plan.json`. One node owns
 scope, business rules (every rule sourced: `file:line`, `R-id`, `confirmed by
@@ -330,7 +342,9 @@ imperative, ≤72 chars, naming what landed. **No AI attribution trailer** —
 A merge conflict between two tasks means Product mis-sized them: resolve it,
 note it in the summary's Lessons.
 
-Then spawn **Lead, mode=review** (`opus`) against the MERGED diff only
+Then retrieve Lead's memory (`memory.sh retrieve --agent lead --query "<the
+task text>"`, block pasted into the prompt) and spawn **Lead** (`opus`)
+against the MERGED diff only
 (`git diff` against the pre-run base, never whole files) → `<run>/report.md`,
 verdict **PASS** or **BLOCKED**, every checklist item with pasted evidence:
 backward compatibility (a breaking change is BLOCKED, never a footnote);
