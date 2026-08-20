@@ -142,6 +142,9 @@ if [ ! -s "$CSV" ]; then
 fi
 
 if [ "${1:-}" = "all" ]; then
+  # `all` is a full re-score: start the CSV over, or rows from the previous
+  # run pile up under the new ones and every median is computed on a mix.
+  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status,correctness' > "$CSV"
   for d in "$H"/runs/T*/*/*; do
     [ -d "$d" ] || continue
     round=$(basename "$d"); arm=$(basename "$(dirname "$d")")

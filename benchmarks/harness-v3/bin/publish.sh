@@ -12,7 +12,7 @@ label="${1:?usage: publish.sh <label>}"
 out="$H/results/$label"
 mkdir -p "$out"
 cp "$H/runs/results.csv" "$out/results.csv"
-"$H/bin/status.sh" > "$out/COVERAGE.txt"
+"$H/bin/status.sh" > "$out/COVERAGE.txt" || true   # status.sh exits 1 on an incomplete matrix; coverage is still worth freezing
 python3 "$H/bin/summarize.py" "$out/results.csv" "$label" > "$out/SUMMARY.md"
 echo "published: $out"
 ls -1 "$out"

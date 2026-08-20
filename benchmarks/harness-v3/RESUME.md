@@ -36,8 +36,14 @@ cannot be compared to the old ones.
 **1. Refresh the arm configs.**
 
 ```bash
-bin/init.sh
+bin/init.sh --configs      # token only; plain init.sh also rebuilds the fixture repo
 ```
+
+**Only before a run, never between cells.** Both forms `rm -rf configs/`,
+and `configs/*/projects/` is where every arm's session transcripts live.
+Refreshing mid-matrix (done on 2026-08-20) zeroes `tokens_*`, `tool_calls`
+and `cache_*` for every cell already run; `cost_usd`, wall and pass rate
+survive because they come from `result.json`.
 
 The OAuth token copied into `configs/*/.credentials.json` expires. A stale one
 fails as `Not logged in` in 57 ms per cell, which looks exactly like a fast, free
