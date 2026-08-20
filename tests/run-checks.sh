@@ -694,8 +694,10 @@ rm -f .tg-active
 
 # ── 23. plugin manifest wires exactly the documented hooks ───────────────────
 # The plugin exists to replace the manual settings.json edit, not to widen it:
-# exactly four events (v3 adds memory ingest on SubagentStop/Stop and the
-# compiled-view load on SessionStart), each command pointing at a script that
+# exactly four events (v3 adds memory ingest on SubagentStop/Stop, the
+# compiled-view load on SessionStart, and the headless driver first on Stop —
+# it must rule on turn-end before memory ingests a "finished" state), each
+# command pointing at a script that
 # exists and that the README install section names. A fifth event or a
 # relocated script is drift.
 head2 "23. plugin manifest: four events, real scripts, same ones README names"
@@ -723,7 +725,7 @@ if node -e '
   const WANT = {
     PostToolUse:  ["hooks/ledger.sh hook"],
     SubagentStop: ["hooks/subagent-gate.sh", "hooks/memory.sh hook subagent-stop"],
-    Stop:         ["hooks/memory.sh hook stop"],
+    Stop:         ["hooks/headless-driver.sh", "hooks/memory.sh hook stop"],
     SessionStart: ["hooks/memory.sh hook session-start"],
   };
   const readme = fs.readFileSync(path.join(TG, "README.md"), "utf8");
@@ -1297,6 +1299,65 @@ CLAR=$(grep -c 'clarifications\.md' "$TG/benchmarks/harness-v3/bin/score.sh" || 
 [ "${CLAR:-0}" -ge 2 ] \
   && ok "scorer excludes clarifications.md from diff and scope counts" \
   || bad "harness-placed clarifications.md would score as an agent edit"
+
+# ── 35. headless driver: turn persistence is a hook, not a prompt ───────────
+# The 2026-08-20 run showed the prompt-only fix insufficient: 3 cells ended
+# the turn with zero subagents spawned, 1 asked a BLOCKING question at the
+# auto-approved gate, 1 shipped a correct fix that failed only lint.
+head2 "35. headless driver + no blocking questions + gate lint + conditional challenger"
+[ -x "$TG/hooks/headless-driver.sh" ] \
+  && ok "headless-driver.sh exists and is executable" || bad "no headless driver"
+grep -q 'headless-driver.sh' "$TG/hooks/hooks.json" \
+  && ok "driver registered on Stop" || bad "driver not wired into hooks.json"
+grep -q 'TEAM_IRFAN_AUTO_APPROVE' "$TG/hooks/headless-driver.sh" \
+  && ok "driver scoped to auto-approve sessions only" || bad "driver could fire interactively"
+grep -q 'BLOCKING questions are forbidden' "$TG/agents/router.md" \
+  && ok "auto-approve forbids blocking questions" || bad "gate can still stall on a question (T3 r2)"
+grep -q 'gate: lint' "$TG/hooks/gate.sh" \
+  && ok "gate.sh runs lint (guardrails layer 1)" || bad "gate narrower than the external gate (T1 r1)"
+grep -q 'challenger: skipped (low-risk)' "$TG/agents/router.md" \
+  && ok "challenger round conditional on plan risk" || bad "challengers unconditional"
+grep -q 'test/\*\*' "$TG/benchmarks/harness-v3/tasks/T3/scope.allowlist" \
+  && ok "T3 allowlist admits the mandated tests" || bad "bench scope contradicts guardrails on T3"
+
+# functional: the driver against synthetic transcripts, in a scratch cwd
+DRV="$TG/hooks/headless-driver.sh"
+DTMP="$TMP/driver"; mkdir -p "$DTMP"; pushd "$DTMP" >/dev/null
+TR="$DTMP/tr.jsonl"
+mktr() { printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":$1}]}}" > "$TR"; }
+IN="{\"transcript_path\":\"$TR\",\"session_id\":\"drv-test\"}"
+
+mktr '"ROUTE: FAST\nDelegating to solo executor."'
+printf '%s' "$IN" | bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "driver silent without TEAM_IRFAN_AUTO_APPROVE" || bad "driver fired interactively"
+
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 2 ] && ok "FAST with no Verdict → blocked" || bad "zero-spawn FAST stop not blocked (T4 r2)"
+
+mktr '"ROUTE: FAST\n**Verdict:** shipped — done."'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "FAST with Verdict → allowed" || bad "driver blocks a finished FAST run"
+
+mktr '"ROUTE: FULL\nProceeding to Product planning phase."'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 2 ] && ok "FULL with no handoff → blocked" || bad "zero-spawn FULL stop not blocked (T2 r1/r2)"
+
+mkdir -p .team-irfan/handoffs && touch .team-irfan/handoffs/x.md
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "FULL with handoff → allowed" || bad "driver blocks a finished FULL run"
+
+mktr '"HAND-BACK — faster manually: no acceptance criterion"'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "HAND-BACK → driver stays out" || bad "driver blocks a designed refusal"
+
+mktr '"ROUTE: FULL\nstall"'
+rm -rf .team-irfan; mkdir -p .team-irfan/.driver; echo 25 > .team-irfan/.driver/drv-test.count
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "block cap reached → allowed (no infinite loop)" || bad "driver can loop forever"
+popd >/dev/null
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

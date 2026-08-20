@@ -86,6 +86,10 @@ A bugfix stating wrong and expected behavior in one sentence ("returns 200,
 should return 400") is FAST: the sentence is the acceptance criterion, and
 locating the file is the executor's first step, not a reason to route FULL.
 
+A perf bug with a named pattern (N+1 → `include`/`in` batching) whose fix
+changes no response shape is FAST even when consumers exist: the contract
+suite is the deterministic protection, and `gate.sh` runs it.
+
 Route: Solo Executor → `gate.sh` → 4-question report.
 Budget: **≤15 tool calls end to end**, router calls included.
 
@@ -167,9 +171,8 @@ Agent(
 )
 ```
 
-**Every node spawns `opus`.** That is the default and it does not need a reason.
-The matrices in `README.md` and `.team-irfan/config.md` are the fallback when
-they and this section disagree — this section wins.
+**Every node spawns `opus`** — the no-reason default. The matrices in
+`README.md`/`.team-irfan/config.md` are fallback; this section wins on disagreement.
 
 Downgrade to `sonnet` only when **all three** hold, and print the reason in the
 ledger:
@@ -178,18 +181,14 @@ ledger:
 - ≤2 files in scope
 - no schema, contract, auth, or security surface in scope
 
-`fable` is the fallback **for opus**, not a cheaper tier — use it when the
-account is at its Opus cap, and say so: `exec-3 fable (opus capped)`. Never
-`haiku`. A node that cheap is a bash command, not an agent.
+`fable` substitutes for opus at the Opus cap — say so: `exec-3 fable (opus
+capped)`. Never `haiku`. Pass `model` explicitly on every spawn; the
+`model:` line in a role file is documentation, nothing reads it.
 
-Pass `model` explicitly on every spawn. The `model:` line in a role file is
-documentation, not configuration; nothing reads it.
-
-**`TG_BENCH_MODEL` set (haiku|sonnet)?** You are inside the benchmark
-harness: spawn EVERY node with that model, overriding the whole matrix
-uniformly — `metrics.sh` stamps it as `bench_model` so the run can never be
-read as production. The production rule (`haiku: never`) stands everywhere
-else.
+**`TG_BENCH_MODEL` set (haiku|sonnet)?** Benchmark harness: spawn EVERY
+node with that model, overriding the matrix uniformly — `metrics.sh` stamps
+`bench_model` so the run can never read as production. The production rule
+(`haiku: never`) stands everywhere else.
 
 Hand each node **only** its artifact paths. No repo tour, no sibling context,
 no summary of what the others are doing.
@@ -207,12 +206,8 @@ bash ~/.claude/team-graph/hooks/run-state.sh <run> <node-just-finished> <next-no
 [1/7] product done · 2 tasks · budget 12/39
 ```
 
-Node, one fact, budget. No prose, no recap of what the node said.
-
-`run-state.json` is the resume point. Killed mid-run, the next session reads
-`completed` and `current` and continues from there. Resuming: read
-`<run>/run-state.json` first, re-spawn `current`, and never re-run anything in
-`completed`.
+Node, one fact, budget. No prose. `run-state.json` is the resume point:
+killed mid-run, read it first, re-spawn `current`, never re-run `completed`.
 
 ## The 7-step sequence
 
@@ -226,10 +221,9 @@ printf '%s\n' "<run>" > .tg-active   # arms the SubagentStop gate + the ledger
 TG_RECORD_BASE=1 TG_RUN=<run> bash ~/.claude/team-graph/hooks/gate.sh
 ```
 
-`reap.sh` runs **first, every time** — at the start, not the end. A run that was
-killed cannot clean up after itself. It reports orphan branches and never
-deletes one. `.tg-active` carries the run directory as its first line; `touch`
-alone leaves the hooks inert.
+`reap.sh` runs **first, every time** — a killed run cannot clean up after
+itself; it reports orphan branches, never deletes. `.tg-active` carries the
+run dir as its first line; `touch` alone leaves the hooks inert.
 
 **Every goal gets its own branch**, off the default branch, never off the
 previous run's. `<type>` ∈ `feat | fix | chore`, same vocabulary as the
@@ -259,8 +253,12 @@ the per-task spec blocks inside the plan — no brief→tasks handover. Open
 questions sit at the top. `run_cap = min(round(chosen expected_calls × 1.3),
 60)`.
 
-**Challenger round (FULL only — FAST keeps its single quality gate).** Roles
-do not spawn; you spawn the sibling and referee via artifacts:
+**Challenger round (FULL only — FAST keeps its single quality gate). Run it
+only when the plan warrants adversarial review**: ≥3 tasks, a schema or
+API-contract change, >1 phase, or an unsourced business rule. Below that
+bar, skip it — write `challenger: skipped (low-risk)` atop `plan.md`, `mv`
+the draft yourself, go straight to the hooks. Roles do not spawn; you spawn
+the sibling and referee via artifacts:
 
 1. Spawn **product-challenger** (`opus`) on `plan.draft.md` →
    `<run>/challenge.md`, verdict `ACCEPT` or `REVISE:<items>`. The task
@@ -299,7 +297,9 @@ set by the harness, never by a person — means the gate is auto-approved
 after the plan is printed: record `human_overrides=auto-approved`, answer
 open questions from `clarifications.md`, and **do not end the turn** — the
 session is headless, an ended turn is an ended session, and the run scores
-zero. Continue to STEP 2 immediately and keep driving, node after node,
+zero. **BLOCKING questions are forbidden here**: answer them yourself —
+`clarifications.md`, then the repo (`package.json` scripts ARE the gate
+commands), then a stated default — log each in the plan's assumptions. Continue to STEP 2 immediately and keep driving, node after node,
 until the STEP 6 summary is written. Without that variable this paragraph
 does not exist.) Open questions
 in the plan are answered here, in the same exchange. Irfan cuts an item →

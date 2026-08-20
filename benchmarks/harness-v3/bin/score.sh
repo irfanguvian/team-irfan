@@ -31,6 +31,11 @@ score_cell() {
   [ -d "$wt" ] || { echo "skip $task/$arm/$round (worktree gone)"; return 0; }
 
   # 1. what changed --------------------------------------------------------
+  # Diffed against the task's base tag, not HEAD: an arm that commits its work
+  # (team-irfan's full pipeline does, on a branch) moves HEAD, and a --cached
+  # diff against HEAD would then read as an empty diff — zeroing diff_loc and
+  # oos_files, and silently blinding the protected-test guard below.
+  local base; base="$(echo "$task" | tr 'A-Z' 'a-z')-base"
   rm -rf "$wt/test/acceptance"      # a re-score must not grade last score's copy
   git -C "$wt" add -A >/dev/null 2>&1
   # Agent-runtime bookkeeping is excluded everywhere it would distort a number:
@@ -41,11 +46,11 @@ score_cell() {
   local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json'
                   ':(exclude).team-irfan' ':(exclude).tg-active'
                   ':(exclude)clarifications.md')
-  git -C "$wt" diff --cached -- . "${NOISE[@]}" > "$out/diff.txt"
-  git -C "$wt" diff --cached --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
-  local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat -- . "${NOISE[@]}" \
+  git -C "$wt" diff --cached "$base" -- . "${NOISE[@]}" > "$out/diff.txt"
+  git -C "$wt" diff --cached "$base" --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
+  local diff_loc; diff_loc=$(git -C "$wt" diff --cached "$base" --numstat -- . "${NOISE[@]}" \
     | awk '{a+=$1; d+=$2} END {print (a+d)+0}')
-  local files; files=$(git -C "$wt" diff --cached --name-only -- . "${NOISE[@]}")
+  local files; files=$(git -C "$wt" diff --cached "$base" --name-only -- . "${NOISE[@]}")
 
   # 2. out-of-scope files --------------------------------------------------
   # Agent-runtime bookkeeping is not role bleed. OMC and Claude Code write
@@ -67,7 +72,7 @@ score_cell() {
 
   # 3. protected test guard ------------------------------------------------
   local guard=ok p; p=$(protected_for "$task")
-  if [ -n "$p" ] && [ -n "$(git -C "$wt" diff --cached --stat -- "$p")" ]; then
+  if [ -n "$p" ] && [ -n "$(git -C "$wt" diff --cached "$base" --stat -- "$p")" ]; then
     guard="edited:$p"
   fi
 

@@ -5,6 +5,32 @@ project's.
 
 ---
 
+## 3.1.2 — 2026-08-20
+
+The 2026-08-20 haiku matrix (results/2026-08-20-haiku-v3-routerfix) showed the
+3.1.1 prompt fixes bought T3 back (0 → 2/3 correct) but turn persistence still
+lost 4 of 12 cells: three turn-ends with zero subagents spawned, one BLOCKING
+question at an auto-approved gate. Prompt discipline is exhausted; these fixes
+are deterministic.
+
+- **`hooks/headless-driver.sh`, first on Stop.** Auto-approve sessions only:
+  blocks turn-end while a routed run (ROUTE: FULL/FAST in the transcript) has
+  no terminal artifact (FULL: a handoff file; FAST: a Verdict: line). Capped at
+  25 blocks/session. Interactive sessions: hook exits 0, human gates intact.
+- **Router: BLOCKING questions forbidden under auto-approve** — answered from
+  clarifications.md → repo → stated default, logged as assumptions.
+- **Router: named-pattern perf bugs are FAST** — the contract suite is the
+  deterministic protection; FULL for a one-file N+1 cost 19x bare on T3.
+- **Router: challenger round now conditional** on plan risk (≥3 tasks, schema/
+  contract change, >1 phase, unsourced rule); low-risk plans skip it.
+- **gate.sh runs lint** (guardrails layer 1) — a correct T1 fix died on one
+  unused import the gate never saw.
+- Bench: T3 allowlist admits `test/**` like every other task — the guardrails
+  mandate tests with every change; the old scope counted them out-of-scope.
+- Checks: section 35 pins all of the above, incl. 7 functional driver tests.
+
+---
+
 ## v3.1.0 — 2026-08-19
 
 The v3 redesign completed: role merge, challengers, budget-phased planning,

@@ -26,3 +26,7 @@ agent scores them.
   explicit: Irfan's five minutes beat fifteen tool calls.
 - Case 7 vs case 4: same vagueness, different route — the shipped
   `clarifications.md` flips it. No file at the repo root → HAND-BACK stands.
+- A named-pattern perf bug (N+1) with consumers is FAST, not FULL: the
+  contract suite is the deterministic protection and gate.sh runs it. FULL
+  for that shape is the 2026-08-20 T3 failure — 19x bare's cost for the
+  same one-file fix.
