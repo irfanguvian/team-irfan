@@ -124,6 +124,10 @@ node -e '
     review_rounds: Number(process.env.TG_ROUNDS) || num("review_rounds"),
     post_ship_fix: kv.post_ship_fix || null,
   };
+  // TG_BENCH_MODEL is set only by the benchmark harness. Stamping it means a
+  // benchmark metrics.json can never be mistaken for a production run — the
+  // production model matrix (haiku: never) is untouched.
+  if (process.env.TG_BENCH_MODEL) out.bench_model = process.env.TG_BENCH_MODEL;
   const file = process.argv[1];
   fs.writeFileSync(file + ".tmp", JSON.stringify(out, null, 2) + "\n");
   fs.renameSync(file + ".tmp", file);

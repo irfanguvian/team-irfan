@@ -60,38 +60,51 @@ flowchart TD
     subgraph ORCH["ORCHESTRATOR · main thread"]
         direction TB
         S0["open run<br/>goal branch, .tg-active, baseline gate"]
-        S1A["1 · PM — scope"]
-        S1B["1 · Lead — 1–3 options"]
-        S1C["1 · PjM — plan.md + plan.json<br/>run_cap = min(round(calls×1.3), 60)"]
-        PG["plan-gate.sh<br/><i>deterministic, output pasted first</i>"]
-        G1{{"⏸ YOU APPROVE THE PLAN<br/>the only gate · silence is not approval"}}
-        S2A["2 · worktrees + executors ×N<br/>parallel only where independent: yes"]
+        MEM1["memory.sh retrieve --agent product<br/><i>## MEMORY block into the prompt</i>"]
+        S1A["1 · PRODUCT — plan.draft.md + plan.json<br/>rules·SCOPE·PHASES·task blocks<br/>run_cap = min(round(calls×1.3), 60)"]
+        S1B["1 · PRODUCT-CHALLENGER<br/>challenge.md · ACCEPT / REVISE<br/><i>user gave a path → verify only</i>"]
+        S1C["1 · Product revision (max 1)<br/>→ plan.md, each item addressed or rejected"]
+        PG["plan-gate.sh + plan-check.sh<br/><i>schema · run_cap · PHASES recomputed<br/>26 + 27×tasks, over cap ⇒ bounced</i>"]
+        G1{{"⏸ YOU APPROVE THE PLAN<br/>the only gate · silence is not approval<br/>multi-phase ⇒ phase 1 only runs"}}
+        S2A["2 · worktrees + executors ×N<br/>own Task block each · rule A +<br/>breaking-change checklist"]
         S2B["2 · QA — test cases from plan.json<br/><b>blind to every diff and worktree</b>"]
-        S3["3 · QA runs per finished task<br/>PASS/FAIL with pasted evidence"]
+        S2C["2 · QA-CHALLENGER — challenge-qa.md<br/>coverage + compat cases, BEFORE execution"]
+        S3["3 · QA runs per finished task<br/>+ FULL regression manifest —<br/>any manifest failure = compat break"]
         S4["4 · fix loop — same executor, same worktree<br/>max 2 retries, 3rd ⇒ BLOCKED, run stops"]
-        S5["5 · merge (one commit per task)<br/>then Lead review — machine gate<br/>verdict PASS | BLOCKED"]
-        S6["6 · summary — printed + handoffs/<br/>lessons ≤3 lines replace the retro"]
+        MEM2["memory.sh retrieve --agent lead"]
+        S5["5 · merge (one commit per task)<br/>then Lead review — machine gate<br/>then LEAD-CHALLENGER, blind re-review<br/>verdict disagreement ⇒ blocker"]
+        S6["6 · summary + retro — printed + handoffs/<br/>manifest append · memory.sh compact<br/>multi-phase ⇒ NEXT PHASE: &lt;goal&gt;"]
         S7["7 · end — nothing else runs"]
     end
 
-    S0 --> S1A --> S1B --> S1C --> PG --> G1
+    S0 --> MEM1 --> S1A --> S1B --> S1C --> PG --> G1
     G1 --> S2A --> S3
-    G1 --> S2B --> S3
-    S3 --> S4 --> S5 --> S6 --> S7
+    G1 --> S2B --> S2C --> S3
+    S3 --> S4 --> MEM2 --> S5 --> S6 --> S7
+    S6 -. "next phase = a fresh run<br/>own ledger, own gate, own approval" .-> S0
 
-    S1A -.-> A1["scope.md"]
-    S1B -.-> A2["options.md"]
-    S1C -.-> A3["plan.md · plan.json<br/>task-&lt;id&gt;.md"]
+    S1A -.-> A3["plan.draft.md · plan.json"]
+    S1B -.-> A9["challenge.md"]
+    S1C -.-> A10["plan.md"]
     S2A -.-> A4["change-summary-&lt;id&gt;.md<br/>+ GATE PASS"]
     S2B -.-> A5["test-cases.md"]
+    S2C -.-> A11["challenge-qa.md"]
     S3 -.-> A6["test-report-&lt;id&gt;.md"]
-    S5 -.-> A7["report.md · docs/REGISTRY.md entry"]
+    S5 -.-> A7["report.md · challenge-lead.md<br/>docs/REGISTRY.md entry"]
     S6 -.-> A8[".team-irfan/handoffs/&lt;date&gt;-&lt;slug&gt;.md<br/>metrics.json"]
+    A10 -. "SubagentStop ingest" .-> DB[("​.team-irfan/memory/<br/>product.db · lead.db")]
+    A7 -. "SubagentStop ingest" .-> DB
+    A8 -. "Stop ingest (ship block)" .-> DB
+    DB -. "BM25 top-12" .-> MEM1
+    DB -. "BM25 top-12" .-> MEM2
 
     style G1 fill:#744210,color:#fff
     style PG fill:#1a365d,color:#fff
+    style S1B fill:#44337a,color:#fff
+    style S2C fill:#44337a,color:#fff
     style S4 fill:#742a2a,color:#fff
     style S5 fill:#22543d,color:#fff
+    style DB fill:#1a365d,color:#fff
 ```
 
 ### Who owns what
@@ -102,7 +115,7 @@ flowchart TD
 | git operations | ✅ branch, worktree, merge, commit | ❌ except commits inside their own worktree |
 | spawns agents | ✅ the only one | ❌ never |
 | budget ledger | ✅ reads it (hook writes it) | counted by the hook |
-| decides scope | ❌ asks you | PjM proposes, plan-gate checks, you approve |
+| decides scope | ❌ asks you | Product proposes, challenger contests, plan-gate + plan-check verify, you approve |
 | ships | ❌ | Lead's review verdict is the ship gate — PASS or BLOCKED |
 
 ---
@@ -115,8 +128,8 @@ from disk. This is what makes the star topology survivable.
 ```mermaid
 flowchart LR
     subgraph RUN["runs/&lt;yyyymmdd-slug&gt;/ · one run"]
-        B["scope.md · options.md<br/>plan.md · plan.json<br/><i>the approved contract</i>"]
-        TK["task-&lt;id&gt;.md · test-cases.md<br/><i>the contract per executor, cases from the plan</i>"]
+        B["plan.draft.md · challenge.md<br/>plan.md · plan.json<br/><i>the approved contract</i>"]
+        TK["plan.md task blocks · test-cases.md<br/><i>the contract per executor, cases from the plan</i>"]
         CS["change-summary-&lt;id&gt;.md<br/><i>what changed + gate output</i>"]
         TR["test-report-&lt;id&gt;.md<br/><i>PASS / FAIL / ESCALATE</i>"]
         RP["report.md<br/><i>Lead review — PASS | BLOCKED</i>"]
@@ -127,6 +140,8 @@ flowchart LR
         CM[".team-irfan/context/&lt;slug&gt;.md<br/><i>per-folder map, gitignored</i>"]
         RG["docs/REGISTRY.md<br/><i>searchable context database</i>"]
         HO["docs/handoff/&lt;date&gt;-&lt;slug&gt;.md<br/><i>what landed, how to test, proof</i>"]
+        MEMD[".team-irfan/memory/<br/><i>product.db · lead.db · memory.log<br/>deterministic, never blocking</i>"]
+        QAD[".team-irfan/qa/<br/><i>regression.manifest — the suite only grows</i>"]
     end
 
     B --> TK --> CS --> TR --> RP --> MT
@@ -210,7 +225,7 @@ orchestrator reads it.
 
 - **Until the plan is approved:** the static cap, 60.
 - **From approval:** the plan's own `run_cap = min(round(chosen option's
-  expected_calls × 1.3), 60)` — computed by PjM, verified by `plan-gate.sh`,
+  expected_calls × 1.3), 60)` — computed by Product, verified by `plan-gate.sh` (and `plan-check.sh` recomputing every phase projection, 26 + 27×tasks),
   read by `ledger.sh cap <run>` (fallback 60 when plan.json is absent).
 
 The projection is in the plan itself — each option carries `expected_calls` —
@@ -230,7 +245,7 @@ enforce a timeout is theatre.
 
 ```mermaid
 flowchart LR
-    N["each node returns"] --> P["[3/7] pjm done · 2 tasks · budget 12/39"]
+    N["each node returns"] --> P["[1/7] product done · 2 tasks · budget 12/39"]
     P --> N
     N --> FIN["run ends"]
     FIN --> SB["summary · chat + .team-irfan/handoffs/"]

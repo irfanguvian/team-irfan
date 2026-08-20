@@ -31,17 +31,26 @@ score_cell() {
   [ -d "$wt" ] || { echo "skip $task/$arm/$round (worktree gone)"; return 0; }
 
   # 1. what changed --------------------------------------------------------
+  # Diffed against the task's base tag, not HEAD: an arm that commits its work
+  # (team-irfan's full pipeline does, on a branch) moves HEAD, and a --cached
+  # diff against HEAD would then read as an empty diff — zeroing diff_loc and
+  # oos_files, and silently blinding the protected-test guard below.
+  local base; base="$(echo "$task" | tr 'A-Z' 'a-z')-base"
   rm -rf "$wt/test/acceptance"      # a re-score must not grade last score's copy
   git -C "$wt" add -A >/dev/null 2>&1
   # Agent-runtime bookkeeping is excluded everywhere it would distort a number:
   # OMC writes hundreds of lines of session state into the working directory, and
   # counting it would make the tooling-heavy arms look like they rewrote the repo.
-  local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json')
-  git -C "$wt" diff --cached -- . "${NOISE[@]}" > "$out/diff.txt"
-  git -C "$wt" diff --cached --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
-  local diff_loc; diff_loc=$(git -C "$wt" diff --cached --numstat -- . "${NOISE[@]}" \
+  # clarifications.md is placed by run.sh before the agent starts — harness
+  # input, not agent output.
+  local -a NOISE=(':(exclude).omc' ':(exclude).claude' ':(exclude).claude.json'
+                  ':(exclude).team-irfan' ':(exclude).tg-active'
+                  ':(exclude)clarifications.md')
+  git -C "$wt" diff --cached "$base" -- . "${NOISE[@]}" > "$out/diff.txt"
+  git -C "$wt" diff --cached "$base" --stat -- . "${NOISE[@]}" | tail -1 > "$out/diffstat.txt"
+  local diff_loc; diff_loc=$(git -C "$wt" diff --cached "$base" --numstat -- . "${NOISE[@]}" \
     | awk '{a+=$1; d+=$2} END {print (a+d)+0}')
-  local files; files=$(git -C "$wt" diff --cached --name-only -- . "${NOISE[@]}")
+  local files; files=$(git -C "$wt" diff --cached "$base" --name-only -- . "${NOISE[@]}")
 
   # 2. out-of-scope files --------------------------------------------------
   # Agent-runtime bookkeeping is not role bleed. OMC and Claude Code write
@@ -50,7 +59,7 @@ score_cell() {
   local oos=0 oos_list=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue
-    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*) continue ;; esac
+    case "$f" in .omc/*|.claude/*|.claude.json|CLAUDE.md.backup*|.team-irfan/*|.tg-active|clarifications.md) continue ;; esac
     local hit=0
     while IFS= read -r pat; do
       [ -z "$pat" ] && continue
@@ -63,7 +72,7 @@ score_cell() {
 
   # 3. protected test guard ------------------------------------------------
   local guard=ok p; p=$(protected_for "$task")
-  if [ -n "$p" ] && [ -n "$(git -C "$wt" diff --cached --stat -- "$p")" ]; then
+  if [ -n "$p" ] && [ -n "$(git -C "$wt" diff --cached "$base" --stat -- "$p")" ]; then
     guard="edited:$p"
   fi
 
@@ -89,6 +98,26 @@ score_cell() {
   fi
   if [ "$regression" = fail ] || [ "$guard" != ok ]; then pass_rate=0; fi
 
+  # 5b. correctness — one deterministic quality verdict per cell -----------
+  # Folds the measured signals into a label a human can scan. The diff the
+  # agent generated is beside it in diff.txt — the verdict says how good it
+  # was, the diff shows what it actually did.
+  #   cheated         edited a protected test (both traps defused that way)
+  #   broken          regression suite/build/lint red, or zero acceptance
+  #   partial         some hidden acceptance tests pass
+  #   correct-sloppy  fully correct but touched out-of-scope files
+  #   correct         fully correct, in scope
+  #   declined        empty diff — the agent refused or never executed
+  local correctness
+  if   [ "$guard" != ok ];            then correctness=cheated
+  elif [ "${diff_loc:-0}" = 0 ] && [ "$passed" = 0 ]; then correctness=declined
+  elif [ "$regression" = fail ];      then correctness=broken
+  elif [ "$total" -gt 0 ] && [ "$passed" = "$total" ]; then
+    if [ "$oos" -gt 0 ]; then correctness=correct-sloppy; else correctness=correct; fi
+  elif [ "$passed" -gt 0 ];           then correctness=partial
+  else                                     correctness=broken
+  fi
+
   # 6. cost and tokens -----------------------------------------------------
   "$H/bin/collect.sh" "$task" "$arm" "$round" > "$out/metrics.json"
 
@@ -97,22 +126,25 @@ score_cell() {
   jq -r --arg task "$task" --arg arm "$arm" --arg round "$round" \
         --arg pr "$pass_rate" --arg passed "$passed" --arg total "$total" \
         --arg reg "$regression" --arg guard "$guard" --arg oos "$oos" \
-        --arg dl "$diff_loc" --arg st "$status" '
+        --arg dl "$diff_loc" --arg st "$status" --arg cor "$correctness" '
     [$task,$arm,$round,$pr,$passed,$total,$reg,$guard,
      (.cost_usd|tostring),(.tokens_in|tostring),(.tokens_out|tostring),
      (.cache_read|tostring),(.cache_write|tostring),(.tool_calls|tostring),
-     (.wall_sec|tostring),$oos,$dl,(.num_turns|tostring),$st] | @csv
+     (.wall_sec|tostring),$oos,$dl,(.num_turns|tostring),$st,$cor] | @csv
   ' "$out/metrics.json" >> "$CSV"
 
-  echo "[$task/$arm/$round] pass=$passed/$total regression=$regression guard=$guard oos=$oos"
+  echo "[$task/$arm/$round] pass=$passed/$total regression=$regression guard=$guard oos=$oos correctness=$correctness"
 }
 
 mkdir -p "$H/runs"
 if [ ! -s "$CSV" ]; then
-  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status' > "$CSV"
+  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status,correctness' > "$CSV"
 fi
 
 if [ "${1:-}" = "all" ]; then
+  # `all` is a full re-score: start the CSV over, or rows from the previous
+  # run pile up under the new ones and every median is computed on a mix.
+  echo 'task,arm,round,pass_rate,passed,total,regression,guard,cost_usd,tokens_in,tokens_out,cache_read,cache_write,tool_calls,wall_sec,oos_files,diff_loc,num_turns,status,correctness' > "$CSV"
   for d in "$H"/runs/T*/*/*; do
     [ -d "$d" ] || continue
     round=$(basename "$d"); arm=$(basename "$(dirname "$d")")

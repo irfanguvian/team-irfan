@@ -100,6 +100,20 @@ else
   echo "gate: typecheck skipped (no tsconfig.json / no typescript)"
 fi
 
+# ------------------------------------------------------------------ 2b. lint
+# 2026-08-20 T1: a correct fix died on one unused import — this gate said
+# PASS, the external lint gate said fail. Guardrails rank static (types,
+# lint) as layer 1; the gate runs what the guardrails preach.
+if node -e 'process.exit((JSON.parse(require("fs").readFileSync("package.json","utf8")).scripts||{}).lint?0:1)' 2>/dev/null; then
+  if ! OUT=$(npm run lint 2>&1); then
+    echo "$OUT" | show
+    fail "lint"
+  fi
+  echo "gate: lint ok"
+else
+  echo "gate: lint skipped (no lint script)"
+fi
+
 # ------------------------------------------------- 3+4. unit tests, coverage
 
 # The run-wide baseline is written once from the project root. A gate run inside

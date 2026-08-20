@@ -110,6 +110,32 @@ to see it:
 - **High refresh rate on one folder** → that folder churns; its map is close to
   worthless. Say so.
 
+## 2b. Memory and hook health — from memory.log, never from prose
+
+`.team-irfan/memory/memory.log` is the ONLY way to know memory is working,
+because memory failures never block a run. One line per operation:
+
+```
+<ts> <op> <agent> <ok|error> adds=<n> updates=<n> retires=<n> hits=<n> stale=<n> ms=<n> [err=<msg>]
+```
+
+Read it whole (it is small and structured) and report:
+
+- **ingest error rate** — `ingest … error` ÷ ingest lines
+- **malformed-JSON rate** — `err=malformed-json-dropped` ÷ infer ingests
+- **retrieval hit counts** — the `hits=` distribution; a run of zero-hit
+  retrievals means retrieval is dead or the dbs are empty
+- **stale-flag frequency** — `stale=` non-zero ÷ retrievals
+- **rows added vs retired over time** — sum `adds=` vs `retires=`; a db that
+  only grows never compacts, one that only retires is bleeding out
+- a plain verdict: **"memory hooks healthy"** or
+  **"memory broken since <ts>: <evidence line pasted>"**
+
+A run of zero-hit retrievals or all-error ingests is a **finding**, proposed
+as a concrete diff (to `hooks/memory.sh` wiring docs or the agent prompt that
+misuses it) like any other evaluation finding. No `memory.log` at all while
+runs exist → the hooks are not wired; say so, that is the finding.
+
 ## 3. Proposals — as diffs, one at a time
 
 Every finding becomes a concrete edit to a **prompt file**, shown as a diff
@@ -184,7 +210,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

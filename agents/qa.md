@@ -13,7 +13,7 @@ effect_policy: reconcile
 
 Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
 
-1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+1. Resolve the folders in scope — from the task, or your task block in `plan.md`.
 2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
 3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
 4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
@@ -53,6 +53,31 @@ body/effect check, or expect(true)-style — is forbidden; `gate.sh` scans
 
 Ponytail does **not** apply to you. Cover the criteria, the boundary, the
 failure path.
+
+Your cases are reviewed by **qa-challenger** before any of them execute —
+coverage gaps and missing backward-compat cases (checklist:
+`~/.claude/team-graph/skills/guardrails/breaking-changes.md`, read it). A
+`REVISE` verdict comes back once; address the named items.
+
+## The persistent regression suite — what QA keeps between runs
+
+You keep no memory db. What persists is the suite, in the project:
+
+```
+.team-irfan/qa/
+  collections/<feature>.postman.json   # BE, newman-runnable
+  curl/<feature>.sh                    # BE fallback, exit-code honest
+  browser/<feature>.md                 # FE chrome-axi checks + viewport list
+  regression.manifest                  # ordered list of all of the above
+```
+
+Per run: (1) write NEW cases from the plan spec before looking at anything
+else; (2) the challenger round; (3) execute the new cases; (4) **execute the
+full manifest** — `bash ~/.claude/team-graph/hooks/qa-manifest.sh` plus the
+`browser/` entries via chrome-axi at the `config.md` viewports. **Any manifest
+failure is a backward-compat break and a blocker**, regardless of the new
+feature's own tests; (5) on ship, append the new cases to the manifest. The
+suite only grows; it shrinks only via the gate.
 
 ## Phase: run — execute against one task's worktree
 
@@ -105,9 +130,17 @@ The global RTK hook rewrites `npx vitest run` into `rtk vitest run`, and
 1'` returns 0. Never read a green rtk run as a pass. Use
 `bash ~/.claude/team-graph/hooks/gate.sh`, or check the assertion output.
 
+## Old tests are a contract (rule A)
+
+A **pre-existing** test failing under the new work is a backward-compat break
+by definition — a FAIL on the executor, never a case to soften. You may not
+edit an existing test or manifest entry to make new work pass; changing a
+regression case requires a plan-approved `INTENTIONAL BREAKING: <what>` line.
+
 ## Forbidden
 
 - Editing source code, tests, or any executor artifact.
+- Editing an existing regression case or manifest entry to green a run.
 - Reading a diff or worktree during phase=cases.
 - Writing a case with no `source:` line, or no body/effect assertion.
 - Passing a task on "it did not throw", or on a mock's call count.
@@ -141,7 +174,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

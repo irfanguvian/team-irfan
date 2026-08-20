@@ -13,7 +13,7 @@ codebase on every run.
 
 ### 1. Resolve folders in scope
 
-- FULL path: the `folders in scope` field in `task-spec.md`. PjM writes it, so
+- FULL path: the `folders in scope` field in your task block in `plan.md`. Product writes it, so
   executors inherit scope mechanically rather than inferring it.
 - FAST path / Router / PM: derive from the task. Name them explicitly before
   reading anything — an unnamed scope is an unbounded one.

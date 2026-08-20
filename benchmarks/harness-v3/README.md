@@ -106,6 +106,24 @@ default while B and C inherit the operator's `"model": "opus"`. Arm C still gets
 its own per-agent model matrix underneath — that is part of the harness, and cost
 is compared in dollars, so the mix is fairly priced.
 
+### The harness × model matrix — `TG_BENCH_MODEL`
+
+The claim under test is that correctness comes from the harness, not the model.
+So the matrix is harness ∈ {bare, omc, team} × model ∈ {haiku, sonnet}, 3 rounds
+each, same model across all arms within a round:
+
+```bash
+TG_BENCH_MODEL=haiku  bin/run.sh all     # every arm on haiku
+TG_BENCH_MODEL=sonnet bin/run.sh all     # every arm on sonnet
+```
+
+`TG_BENCH_MODEL` pins `--model` on every arm AND flows into arm C, where the
+router overrides its per-node matrix uniformly and `metrics.sh` stamps
+`bench_model` into `metrics.json`. **The production matrix keeps `haiku:
+never`** — this variable is the only thing that bypasses it, and every number
+it produces carries the label, so a benchmark result can never be mistaken for
+a production run. `meta.json` records both the alias and the resolved model id.
+
 Every run gets its own git worktree, its own SQLite file, and its own cloned
 `node_modules`, so nothing leaks between rounds. Session transcripts land under
 each arm's own config dir, so one arm cannot read another's.
@@ -119,7 +137,9 @@ Operator behaviour is a hidden variable, so it is scripted, not improvised.
 1. **Plan gate (arm C).** Auto-approved via `TEAM_IRFAN_AUTO_APPROVE=1`. Never
    steered. If the plan is wrong, it gets approved and the harness fails — the
    harness is what is under test, not the operator's judgement.
-2. **Clarifying questions.** Answered only from `tasks/<T>/clarifications.md`.
+2. **Clarifying questions.** Answered only from `tasks/<T>/clarifications.md`,
+   which `run.sh` copies to every worktree root — headless agents read it there
+   instead of asking (the scorer excludes it from diff and scope counts).
    Anything not covered gets exactly `use your judgement`, logged as a human turn.
 3. **Stuck or looping.** No rescue. Hard stop at 45 minutes (`MAX_SEC`) or 150
    turns (`MAX_TURNS`), recorded as `fail(timeout)` with cost as measured.

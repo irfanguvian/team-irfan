@@ -44,10 +44,15 @@ ledger — in one step, no `settings.json` editing. In Claude Code:
 /plugin install team-irfan@team-irfan
 ```
 
-The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. Both hooks
-stay **inert without a `.tg-active` marker** in the working directory, exactly
-as in the manual install below — installing the plugin changes nothing for any
-other workflow.
+The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. It wires
+the SubagentStop quality gate, the PostToolUse ledger, the Stop-side
+headless driver (`hooks/headless-driver.sh` — auto-approve sessions only:
+blocks turn-end until the routed run's terminal artifact exists), and the
+memory hooks
+(`hooks/memory.sh` on SubagentStop/Stop for ingest, SessionStart for the
+compiled-view load). Every hook stays **inert without a `.tg-active` marker**
+in the working directory, exactly as in the manual install below — installing
+the plugin changes nothing for any other workflow.
 
 Register the slash commands — create `~/.claude/commands/team-irfan.md`:
 
@@ -121,7 +126,7 @@ Verify the install:
 
 ```bash
 cd ~/.claude/team-graph/tests/fixture && npm install
-bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 205 passed, CHECKS PASS
+bash ~/.claude/team-graph/tests/run-checks.sh     # expect: 306 passed, CHECKS PASS
 bash ~/.claude/team-graph/hooks/doctor.sh         # expect: DOCTOR PASS
 ```
 
@@ -221,8 +226,8 @@ skills, or your settings.
 This is the part that makes repeat runs cheap. **Agents read context maps, not
 folders.**
 
-1. Resolve the folders in scope (the project manager writes `folders in scope`
-   into each task spec, so executors inherit scope mechanically).
+1. Resolve the folders in scope (Product writes `Folders in scope` into each
+   task block of `plan.md`, so executors inherit scope mechanically).
 2. Load `config.md` + the maps for **those folders only**.
 3. Freshness check — one command per folder:
    ```bash
@@ -260,68 +265,83 @@ therefore nothing nests.
 ```
 ORCHESTRATOR (main thread)
   │  owns: the sequence · the budget ledger · every git operation
-  │        · the one conversation with you
+  │        · the challenger refereeing · the one conversation with you
   │
   │  STEP 1 — PLAN
-  ├─ PM ──────────────────► scope.md
-  │    Scope-in / scope-out / open questions. Every rule carries a source:
-  │    file:line, registry R-id, or "ask user". No gate of its own — the
-  │    questions travel into the plan.
-  ├─ LEAD (mode=options) ─► options.md
-  │    1–3 solution options, never more: approach, files, risk,
-  │    expected_calls. One marked recommended, one line of why.
-  ├─ PJM ─────────────────► plan.md + plan.json + task-<id>.md per task
-  │    Restates the task as a verifiable work list, folds in scope and
-  │    options, chooses one. run_cap = min(round(expected_calls × 1.3), 60).
-  ├─ hooks/plan-gate.sh ──► deterministic, zero LLM. Schema, option count,
-  │    chosen id, numeric calls, run_cap arithmetic, non-empty scope.
-  │    Output pasted BEFORE the question. Fail → PjM regenerates (max 2,
-  │    then HAND-BACK with the error).
+  ├─ memory.sh retrieve --agent product ──► ## MEMORY block into the prompt
+  ├─ PRODUCT ─────────────► plan.draft.md + plan.json
+  │    ONE node owns product, project and business flow — no brief→tasks
+  │    handover. Business rules (each sourced: file:line, R-id, confirmed
+  │    by user, or "ask user"), SCOPE block, PHASES block, per-task spec
+  │    blocks. Open questions at the TOP of the plan.
+  │    run_cap = min(round(chosen expected_calls × 1.3), 60).
+  ├─ PRODUCT-CHALLENGER ──► challenge.md · ACCEPT / REVISE:<items>
+  │    The user's prompt named a path → verify it only (feasibility,
+  │    unsourced claims, projection, compat risks). Goal without a path →
+  │    ≥2 alternatives with call projections. ACCEPT → draft becomes
+  │    plan.md. REVISE → Product addresses or rejects each item, once;
+  │    unresolved → both positions printed for you.
+  ├─ hooks/plan-gate.sh ──► plan.json schema + run_cap arithmetic
+  ├─ hooks/plan-check.sh ─► PHASES parsed, every projection RECOMPUTED
+  │    (26 + 27×tasks), any phase over cap → bounced to Product.
+  │    Emits "PLAN OK: n phases, max projection X/60" — pasted above the
+  │    question.
   │     ⏸ YOU APPROVE THE PLAN ⏸   plan.md printed in chat in FULL first;
-  │                                the question carries no plan content.
-  │                                Silence is not approval. The ONLY gate.
-  │    On approval, run_cap replaces the static 60 (ledger.sh cap <run>).
+  │                                open questions answered in the same
+  │                                exchange. Silence is not approval.
+  │                                The ONLY human gate.
+  │    Multi-phase plans execute PHASE 1 ONLY — each later phase is a
+  │    fresh run with its own ledger, gates, and approval.
   │
   │  STEP 2 — EXECUTE + TEST-CASE GEN, in parallel
   ├─ git worktree add ../tg-<slug>-<id> -b <type>/<slug>-<id>
   ├─ EXECUTOR ×N ─────────► change-summary-<id>.md + GATE PASS
-  │    Parallel lanes only where the task-spec says independent: yes.
+  │    Each gets its own Task block from plan.md, never the whole plan.
+  │    Rule A: a pre-existing test failing = compat break, stop or declare
+  │    INTENTIONAL BREAKING (only valid if the plan declares it). Walks
+  │    skills/guardrails/breaking-changes.md before the summary.
   ├─ QA (phase=cases) ────► test-cases.md — from plan.json ONLY, blind to
-  │    every diff and worktree. Backend: executable curl cases with
-  │    status+body assertions. Frontend: chrome-devtools-axi steps, or a
-  │    manual checklist that says so. gate.sh fails assertion-free cases.
+  │    every diff and worktree.
+  ├─ QA-CHALLENGER ───────► challenge-qa.md — coverage gaps + missing
+  │    backward-compat cases from the checklist, BEFORE anything executes.
   │
   │  STEP 3 — QA RUNS (per finished task)
   ├─ QA (phase=run) ──────► test-report-<id>.md — each case PASS/FAIL with
-  │    pasted command output. No narrative verdicts.
+  │    pasted output, then the FULL regression manifest
+  │    (hooks/qa-manifest.sh) — any manifest failure is a compat break and
+  │    a blocker, regardless of the new feature's own tests.
   │
   │  STEP 4 — FIX LOOP, HARD-CAPPED
   │    FAIL → only the failing cases + evidence, SAME executor, SAME
   │    worktree. retry-guard.sh: max 2 retries. 3rd failure → the run STOPS,
-  │    BLOCKED written to blocked.log by the hook, evidence into the
-  │    summary, handed to you. No "continue?" loop.
+  │    BLOCKED written to blocked.log by the hook. No "continue?" loop.
   │
   │  STEP 5 — MERGE + LEAD REVIEW (machine gate, no human)
   ├─ git merge --squash · commit · worktree remove   (one commit per task,
   │    registry entry staged with the last one)
-  ├─ LEAD (mode=review) ──► report.md · verdict PASS | BLOCKED
-  │    Merged diff only, vs the pre-run base. Backward compatibility listed
-  │    explicitly — a breaking change is BLOCKED, never a footnote.
-  │    typecheck/lint/tests/build via gate.sh, output pasted. No files
-  │    outside plan.json scope_folders. BLOCKED + fixable → back to the
-  │    executor within the same retry budget; else the run stops.
+  ├─ memory.sh retrieve --agent lead ──► ## MEMORY block into the prompt
+  ├─ LEAD ────────────────► report.md · verdict PASS | BLOCKED
+  │    Merged diff only. Walks the breaking-change checklist — an
+  │    undeclared hit is BLOCKED, never a footnote.
+  ├─ LEAD-CHALLENGER ─────► challenge-lead.md · PASS | BLOCKED
+  │    Blind re-review of the same diff (never reads report.md). Verdict
+  │    disagreement = automatic blocker, both positions to you.
   │
-  │  STEP 6 — SUMMARY
+  │  STEP 6 — SUMMARY (+ retro maintenance)
   ├─ .team-irfan/handoffs/<date>-<slug>.md — one line per node, diff --stat,
-  │    case pass/fail counts, paste-able test commands, breaking changes,
-  │    lessons (max 3 lines — this IS the retro), mermaid of what ran,
-  │    one-line verdict. Printed in chat too. metrics.json from the ledger.
+  │    case counts, paste-able test commands, breaking changes, lessons,
+  │    verdict. Multi-phase → ends with "NEXT PHASE: <goal>". QA's new
+  │    cases appended to the regression manifest. memory.sh compact.
+  │    metrics.json from the ledger.
   │
   └─ STEP 7 — END. The session terminates. Nothing else runs.
+     (SubagentStop/Stop hooks ingested plan.md, the review report, and the
+      ship block into .team-irfan/memory/ along the way — one Haiku call
+      per artifact, ops-only contract, never blocking.)
 ```
 
 One progress line reaches you as each node returns —
-`[3/7] pjm done · 2 tasks · budget 12/39`. Node, one fact, budget.
+`[1/7] product done · 2 tasks · budget 12/39`. Node, one fact, budget.
 
 ## Quality gate
 
@@ -384,11 +404,20 @@ Every agent carries an identical forbidden-actions block:
 
 - **FAST ≤15 tool calls. FULL: ≤60 until the plan is approved, then the
   plan's own `run_cap`** — `min(round(chosen option's expected_calls × 1.3),
-  60)`, computed by PjM and verified by `plan-gate.sh`. A PostToolUse hook
+  60)`, computed by Product and verified by `plan-gate.sh`. A PostToolUse hook
   keeps the ledger — `hooks/ledger.sh`, appending one line per tool call to
   `<run>/ledger.log` — and the orchestrator reads it. It does not count. A
   number the measured party types is not a measurement. At the cap the run
   stops with a partial summary rather than overrunning silently.
+- **Every plan is written against the cap, or split until it is.** The
+  projection formula is **`26 + 27×tasks`** per phase (challenger spawns
+  priced in), recomputed — never trusted — by `hooks/plan-check.sh` before
+  the gate. A phase over 60 bounces the plan back to Product; multi-phase
+  plans execute phase 1 only, and each later phase is a fresh run. plan-check
+  is design-time; the ledger is runtime. Both.
+- **Challenger calls count in the same ledger.** No side budget: each
+  challenger is capped at 5 tool calls and reads artifacts + context maps
+  only, never trees.
 - **The cap is checked mechanically, before every spawn.** `ledger.sh read`
   and `ledger.sh cap` (plan.json `run_cap`, fallback 60) run before each
   node; at or over the cap, nothing spawns. The cap moves only when you state
@@ -405,7 +434,7 @@ Every agent carries an identical forbidden-actions block:
 - **More tasks is more overhead, not more parallelism.** Each task buys a
   worktree, an executor, a QA run and a merge. Splitting is for work that
   genuinely cannot share a file — never for work that merely can be described in
-  more sentences. PjM prints the projection in the SCOPE block so the cap is
+  more sentences. Product prints the projection in the SCOPE and PHASES blocks so the cap is
   raised with the number visible, not discovered at call 150.
 - **Retry limit 2, then the run stops.** The 3rd failure writes a hook-owned
   `BLOCKED` to `<run>/blocked.log`; the failing cases and evidence go into
@@ -454,7 +483,12 @@ does.
 | every node | `opus` | default |
 | any node | `sonnet` | only when **all three** hold: it reads a spec it does not have to interpret · ≤2 files in scope · no schema, contract, auth or security surface. The reason gets printed in the ledger. |
 | any node | `fable` | the account is at its Opus cap. This is the fallback **for** opus, not a cheaper tier — say so: `exec-3 fable (opus capped)` |
-| any node | `haiku` | never. A node that cheap is a bash command, not an agent. |
+| any node | `haiku` | never. A node that cheap is a bash command, not an agent. (One exception that is not a node: memory ingestion makes a single `claude -p --model haiku` extraction call — ops-only contract, never blocking.) |
+
+**Benchmarks override the matrix uniformly**: `TG_BENCH_MODEL=haiku|sonnet`
+pins every node to that model and stamps `bench_model` into `metrics.json`, so
+a benchmark number can never be mistaken for a production run. The production
+rule (`haiku: never`) is untouched.
 
 Overridable per-project in `.team-irfan/config.md`, but `agents/router.md` wins
 over any matrix. The orchestrator passes `model` explicitly on each spawn — the
@@ -469,36 +503,74 @@ registered subagents and nothing parses their frontmatter.
 graph.json   the FULL pipeline as data — nodes, edges, the one human gate,
              effect policies. Validated by the checks: acyclic, every agent
              node a leaf, exactly one human-approval node, and every policy
-             matching the prompt file's frontmatter. A node may carry
-             `prompt` when its prompt file is shared (lead runs twice:
-             options, review).
-agents/      router · pm · pjm · lead · executor · qa
-             solo-executor · init · evaluation
-hooks/       gate.sh · plan-gate.sh · retry-guard.sh · subagent-gate.sh
-             ledger.sh · reap.sh · run-state.sh · metrics.sh
-             init-scaffold.sh
+             matching the prompt file's frontmatter.
+agents/      router · product · product-challenger · lead · lead-challenger
+             executor · qa · qa-challenger · solo-executor · init · evaluation
+hooks/       gate.sh · plan-gate.sh · plan-check.sh · retry-guard.sh
+             subagent-gate.sh · ledger.sh · memory.sh · qa-manifest.sh
+             reap.sh · run-state.sh · metrics.sh · init-scaffold.sh · doctor.sh
 lib/         atomic.sh   shared write primitives (atomic replace, lock)
-benchmarks/  run.sh + tester/{fixtures,ground-truth} + baselines/
-             does a prompt diff help? — with a number, not an opinion
-skills/      guardrails/   engineering rules every node obeys
+benchmarks/  run.sh + tester/{fixtures,ground-truth} + baselines/  — plus
+             harness-v3/, the three-arm harness×model matrix (see below)
+skills/      guardrails/   engineering rules every node obeys, plus
+                           breaking-changes.md — the compat checklist
              context-loading/   the map-first rule
-templates/   plan (md+json) · scope · task-spec · change-summary
-             test-cases · test-report · report · summary · config
-             context-map · metrics.json
+templates/   plan (md+json — the one Product artifact: rules, SCOPE, PHASES,
+             task blocks) · change-summary · test-cases · test-report
+             report · summary · config · context-map · metrics.json
 runs/        legacy pre-2026-08-18 run state. Current runs live in the
              project: .team-irfan/runs/<yyyymmdd-slug>/ (gitignored), with
              .team-irfan/runs/LEDGER.md — one line per run, latest last —
              as the session ledger any later session resumes from
 tests/       fixture/ · run-checks.sh · cases.md
 docs/        workflow.md   the visual walkthrough
+             memory.md     the agent-memory design + mem0 decision record
              evaluations/  what past runs measured, and what changed because of it
 CHANGELOG.md what changed in each version of the workflow
 ```
 
-A run directory holds `scope.md`, `options.md`, `plan.md`, `plan.json`,
-`task-<id>.md`, `test-cases.md`, `change-summary-<id>.md`,
+A run directory holds `plan.draft.md`, `challenge.md`, `plan.md`,
+`plan.json`, `test-cases.md`, `challenge-qa.md`, `change-summary-<id>.md`,
 `test-report-<id>.md`, `retries.json`, `blocked.log`, `run-state.json`,
-`ledger.log`, `ledger.json`, `report.md`, `metrics.json`.
+`ledger.log`, `ledger.json`, `report.md`, `challenge-lead.md`,
+`metrics.json`. The project additionally keeps `.team-irfan/memory/`
+(Product + Lead memory) and `.team-irfan/qa/` (the persistent regression
+suite) across runs.
+
+### Memory — Product and Lead remember, deterministically
+
+Design and decision record: [`docs/memory.md`](docs/memory.md). SQLite +
+FTS5/BM25, per-repository, gated on `.tg-active`, and **never blocking** — a
+memory failure logs one line and exits 0. The orchestrator retrieves top-12
+facts before spawning Product or Lead and pastes them as a read-only
+`## MEMORY` block; SubagentStop/Stop hooks ingest the plan, the review
+report, and the ship block (one Haiku call each, JSON-ops-only contract —
+Haiku proposes, the pipeline disposes). Every operation appends one line to
+`.team-irfan/memory/memory.log`:
+
+```
+<ts> <op:ingest|retrieve|compile|compact> <agent> <ok|error> adds=<n> updates=<n> retires=<n> hits=<n> stale=<n> ms=<n> [err=<msg>]
+```
+
+That log is the only health signal memory has — `/team-irfan-evaluation`
+reads it and reports ingest error rate, malformed-JSON rate, hit counts,
+stale-flag frequency, and a plain verdict.
+
+### QA persistence + backward compatibility
+
+QA keeps no memory db — what persists is the **regression suite**:
+`.team-irfan/qa/{collections,curl,browser}/` plus `regression.manifest`,
+executed whole every run (`hooks/qa-manifest.sh`, exit-code honest). Any
+manifest failure is a compat break and a blocker. On ship the new cases are
+appended; the suite only grows.
+
+Two more mechanisms, both mandatory: **rule A** (a pre-existing test failing
+under new work is a compat break by definition — restore compatibility or
+declare `INTENTIONAL BREAKING`, valid only if the approved plan declares it)
+and the **static breaking-change checklist**
+([`skills/guardrails/breaking-changes.md`](skills/guardrails/breaking-changes.md)),
+walked by the executor before its summary, by qa-challenger against the
+cases, and by Lead — where an undeclared hit is a blocker, never a footnote.
 
 ### Node contracts
 
@@ -525,19 +597,35 @@ bash benchmarks/run.sh --score off-by-one r.md   # score against ground truth
 bash benchmarks/run.sh --save-baseline           # commit the new numbers
 ```
 
-Three cases for QA: a seeded off-by-one under a green suite, a suite that
-asserts on a mock and never on an outcome, and a **clean** one that must produce
-zero findings. That third one is the point — an agent that flags everything is
-not a careful reviewer, and without a false-positive case nothing measures the
-difference. The committed baseline currently says `measured: false`; nulls in it
-are not zeros.
+Four cases for QA: a seeded off-by-one under a green suite, a suite that
+asserts on a mock and never on an outcome, a **clean** one that must produce
+zero findings, and a **compat trap** — a change that passes its own new tests
+while breaking a pre-existing endpoint (the `checkout` contract); a tester
+that trusts the new tests alone, or edits the old test to green it, scores
+zero. The clean case is the false-positive guard; the trap is the rule-A
+guard. The committed baseline currently says `measured: false`; nulls in it
+are not zeros — replace them only with real run numbers.
+
+`--score` also records measured dimensions when handed the artifacts:
+`TG_SCORE_GATE` (gate output → PASS/FAIL), `TG_SCORE_REGRESSION`
+(qa-manifest output), `TG_SCORE_RUN` (ledger.log → tool calls, source:
+ledger; retries.json → retries), `TG_SCORE_TRANSCRIPT` (turn count for
+non-team arms, labeled as a transcript count, never passed off as a ledger),
+`TG_SCORE_WALL`, and `TG_BENCH_MODEL` → `bench_model`.
+
+The **workflow-vs-model** claim — correctness comes from the harness, not the
+model — runs in [`benchmarks/harness-v3/`](benchmarks/harness-v3/README.md):
+harness ∈ {bare Claude Code, OMC, team-irfan} × model ∈ {haiku, sonnet} via
+`TG_BENCH_MODEL`, 3 rounds each, same model across arms within a round, with
+feature tasks scored against ground-truth diffs and a backward-compat trap
+(T3) that fails hard no matter how fast the result is.
 
 ---
 
 ## Tests
 
 ```bash
-bash tests/run-checks.sh        # 174 deterministic checks, zero agents
+bash tests/run-checks.sh        # 306 deterministic checks, zero agents
 ```
 
 Covers: stub rejection with `file:line` · clean-fixture pass · typecheck failure
@@ -557,10 +645,21 @@ acyclic, exactly one human gate, and agreeing with the prompt files · quality f
 stages · route outcome validated against its enum · 10 concurrent retry-guard
 writers losing no keys · mutation smoke catching a vacuous test and
 false-positiving on none · the benchmark scorer discriminating in both
-directions · and a line-count ceiling on every prompt file.
+directions · a line-count ceiling on every prompt file · plan-check's
+pass/fail matrix (good fixture, missing PHASES block, wrong projection,
+over-cap phase) · challenger contracts (≤5 calls, side_effect_free, verdict
+vocabulary, blindness rules, FAST untouched) · memory round-trip, hash
+dedup, never-blocks on a corrupted db, the memory.log line format, and
+`[maybe-stale]` flagging · the Haiku infer path dropping malformed JSON and
+compact enforcing the row cap · the breaking-change checklist present and
+loaded by the right agents, rule A stated · qa-manifest.sh exit-code honest
+in both directions, loud on a shrunken suite · the compat-trap fixture
+scored in both directions · and `TG_BENCH_MODEL` stamping `bench_model`
+into benchmark metrics while production metrics stay unstamped.
 
-The fixture is a small TypeScript package with a seeded off-by-one bug and a
-toggleable stub test. The harness restores it on exit.
+The fixture is a small TypeScript package with a seeded off-by-one bug, a
+second endpoint (`checkout`) whose contract test enables the compat trap,
+and a toggleable stub test. The harness restores it on exit.
 
 ---
 
@@ -571,6 +670,20 @@ with `vitest` (never jest) — the gate degrades gracefully elsewhere but the
 guardrails are written for that stack.
 
 ## Status
+
+**v3.1.0 — the v3 redesign completed.** One **Product** node owns product,
+project and business flow (PM + PjM merged; no brief→tasks handover), with
+per-task spec blocks inside the single `plan.md`. **Challenger siblings**
+(product / qa / lead) verify without breaking the star — spawned by the
+orchestrator, debating via artifacts, one revision round, disagreement
+surfaced to you. **Budget-phased planning**: every plan carries a PHASES
+block, `plan-check.sh` recomputes `26 + 27×tasks` per phase, and multi-phase
+plans execute phase 1 only. **Agent memory** for Product and Lead
+(SQLite + FTS5, deterministic, never blocking — `docs/memory.md`), seeded by
+init, ingested by hooks, retrieved at spawn. **Backward compatibility
+first-of-mind**: rule A, the breaking-change checklist, and QA's persistent
+regression manifest. Benchmarks gained the harness×model matrix
+(`TG_BENCH_MODEL`) and the compat-trap case.
 
 **v3.0.0 — the 7-step FULL harness.** Human gates went from three to one: the
 plan approval, fed by a deterministic `plan-gate.sh` and priced by the plan's
@@ -602,7 +715,7 @@ moved into the project at `.team-irfan/runs/` with a session `LEDGER.md` ·
 handoffs into `.team-irfan/handoffs/` (never pushed) · an evidence-not-testimony
 lead report with a write-denied fallback · a stakeholder report under
 `docs/reports/` (written, never committed — you commit it) with curl tests per
-changed endpoint · and PjM's SCOPE block drawing the execution path with a
+changed endpoint · and the plan's SCOPE block drawing the execution path with a
 rejected alternative. Record:
 [`docs/evaluations/2026-08-18-fanible-msg91.md`](docs/evaluations/2026-08-18-fanible-msg91.md).
 

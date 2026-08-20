@@ -6,9 +6,7 @@ run: <yyyymmdd-slug>
 
 <one line per node that ran.>
 
-- pjm: <line>
-- pm: <line>
-- lead (options): <line>
+- product: <line>
 - exec-1: <line>
 - qa: <line>
 - lead (review): <line>
@@ -47,7 +45,11 @@ curl -s -i http://127.0.0.1:3000/api/thing
 
 ```mermaid
 flowchart LR
-    pjm --> gate{{"⏸ plan approved"}} --> exec1 --> qa --> merge --> lead --> summary
+    product --> gate{{"⏸ plan approved"}} --> exec1 --> qa --> merge --> lead --> summary
 ```
 
 **Verdict:** shipped | partial | blocked — <one line>
+
+NEXT PHASE: <the next phase's goal from the plan's PHASES block — multi-phase
+runs only; single-phase runs omit this line>
+

@@ -108,18 +108,19 @@ check_fields() {
   for f in "$@"; do grep -qF "$f" "$file" || missing="$missing '$f'"; done
   [ -z "$missing" ] && ok "$1" || bad "$1 missing:$missing"
 }
-check_fields scope.md          '## Problem' '## Scope in' '## Scope out' '## Open questions' '## Acceptance'
-check_fields task-spec.md      '## Goal' '## Files in scope' '## Acceptance criteria' '## Out of scope' 'independent:'
 check_fields change-summary.md '## What changed' '## Files' '## How to verify' '## Gate output'
 check_fields test-report.md    'verdict:' '## Cases' '## Evidence' '## Bugs found' '## Not covered'
 check_fields report.md         'verdict:' '## Backward compatibility' '## Gate' '## Scope' '## Findings' '**Verdict:**'
-check_fields plan.md           '## Goal' '## Work list' '## Scope' '## Options' '## Chosen option' '## Test contract' '## Open questions for Irfan' '## Run cap'
+# plan.md is the merged Product artifact: it absorbed scope.md (business rules
+# with sources, scope in/out, open questions) and task-spec.md (per-task spec
+# blocks: files in scope, acceptance criteria, independent lanes).
+check_fields plan.md           '## Open questions for Irfan' '## Goal' '## Work list' '## Business rules' '## Scope' '## SCOPE' '## PHASES' '## Tasks' '**Files in scope:**' '**Acceptance criteria:**' 'independent:' '## Test contract' '## Run cap'
 check_fields test-cases.md     'source: plan.json ONLY' 'expect_status' 'expect_body' 'expect_effect' 'chrome-devtools-axi'
 check_fields summary.md        '## What the team did' '## Changes' '## Test cases' '## How to test' '## Breaking changes' '## Lessons' '## What ran' '**Verdict:**'
 
 # ── 4b. every agent contract declares its budget and forbidden list ──────────
 head2 "4b. agent contracts declare budget + forbidden actions"
-for a in router solo-executor pm pjm lead executor qa; do
+for a in router solo-executor product lead executor qa product-challenger lead-challenger qa-challenger; do
   f="$TG/agents/$a.md"
   if [ ! -f "$f" ]; then bad "$a.md missing"; continue; fi
   grep -q '^budget:' "$f" && grep -q '^## Forbidden' "$f" \
@@ -300,10 +301,9 @@ cd "$FIXTURE" || exit 2
 # ── 12. a killed run is resumable from disk alone ────────────────────────────
 head2 "12. a killed run is resumable from disk alone"
 RUN="$TMP/resume"; mkdir -p "$RUN"
-printf '# brief\n' > "$RUN/brief.md"
-printf '# tasks\n- T1\n- T2\n' > "$RUN/tasks.md"
-bash "$TG/hooks/run-state.sh" "$RUN" pm pjm >/dev/null
-bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+printf '# plan\n' > "$RUN/plan.md"
+printf '{"run_cap":39}\n' > "$RUN/plan.json"
+bash "$TG/hooks/run-state.sh" "$RUN" product exec-1 >/dev/null
 bash "$TG/hooks/retry-guard.sh" "$RUN" T1 >/dev/null
 # simulate the kill: nothing else exists
 
@@ -311,9 +311,9 @@ if node -e '
   const fs=require("fs"), d=process.argv[1];
   const st=JSON.parse(fs.readFileSync(d+"/run-state.json","utf8"));
   const fail=m=>{console.error(m);process.exit(1)};
-  if (!st.completed.includes("pjm")) fail("cannot tell pjm finished");
+  if (!st.completed.includes("product")) fail("cannot tell product finished");
   if (st.current !== "exec-1") fail("cannot tell where to resume");
-  for (const f of st.completed.map(n=>({pm:"brief.md",pjm:"tasks.md"}[n])).filter(Boolean))
+  for (const f of st.completed.map(n=>({product:"plan.md"}[n])).filter(Boolean))
     if (!fs.existsSync(d+"/"+f)) fail("completed node has no artifact: "+f);
   const r=JSON.parse(fs.readFileSync(d+"/retries.json","utf8"));
   if (r.T1 !== 1) fail("retry count did not survive the kill");
@@ -323,10 +323,10 @@ else
   bad "run is not resumable from disk: $(cat "$TMP/rerr")"
 fi
 # re-recording a finished node must not duplicate it
-bash "$TG/hooks/run-state.sh" "$RUN" pjm exec-1 >/dev/null
+bash "$TG/hooks/run-state.sh" "$RUN" product exec-1 >/dev/null
 node -e '
   const st=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  process.exit(st.completed.filter(n=>n==="pjm").length === 1 ? 0 : 1);
+  process.exit(st.completed.filter(n=>n==="product").length === 1 ? 0 : 1);
 ' "$RUN/run-state.json" && ok "completed list is idempotent" || bad "resume point duplicates nodes"
 
 grep -q 'run-state.sh' "$TG/agents/router.md" \
@@ -692,11 +692,15 @@ fi
 mv src/cart.test.ts.bak src/cart.test.ts
 rm -f .tg-active
 
-# ── 23. plugin manifest wires exactly the two documented hooks ───────────────
+# ── 23. plugin manifest wires exactly the documented hooks ───────────────────
 # The plugin exists to replace the manual settings.json edit, not to widen it:
-# exactly two events, each pointing at a script that exists and that the README
-# install section names. A third event or a relocated script is drift.
-head2 "23. plugin manifest: two events, real scripts, same ones README names"
+# exactly four events (v3 adds memory ingest on SubagentStop/Stop, the
+# compiled-view load on SessionStart, and the headless driver first on Stop —
+# it must rule on turn-end before memory ingests a "finished" state), each
+# command pointing at a script that
+# exists and that the README install section names. A fifth event or a
+# relocated script is drift.
+head2 "23. plugin manifest: four events, real scripts, same ones README names"
 if node -e '
   const fs = require("fs"), path = require("path");
   const TG = process.argv[1];
@@ -704,32 +708,43 @@ if node -e '
 
   const plugin = JSON.parse(fs.readFileSync(path.join(TG, ".claude-plugin/plugin.json"), "utf8"));
   if (plugin.name !== "team-irfan") fail("plugin.json name is " + plugin.name);
-  if (!plugin.hooks) fail("plugin.json declares no hooks file");
-  const hooksPath = path.join(TG, plugin.hooks);
+  // hooks/hooks.json is auto-loaded by the plugin system; declaring it in
+  // plugin.json again is a duplicate-load error (measured: plugin 3.1.0
+  // failed to load with manifest.hooks set). The manifest must NOT name it.
+  if (plugin.hooks) fail("plugin.json declares hooks — hooks/hooks.json auto-loads; the manifest reference double-loads it");
+  const hooksPath = path.join(TG, "hooks/hooks.json");
+  if (!fs.existsSync(hooksPath)) fail("hooks/hooks.json missing — nothing auto-loads");
   const cfg = JSON.parse(fs.readFileSync(hooksPath, "utf8")).hooks;
 
   const events = Object.keys(cfg).sort();
-  if (events.join(",") !== "PostToolUse,SubagentStop")
-    fail("expected exactly PostToolUse,SubagentStop — got " + events.join(","));
+  if (events.join(",") !== "PostToolUse,SessionStart,Stop,SubagentStop")
+    fail("expected exactly PostToolUse,SessionStart,Stop,SubagentStop — got " + events.join(","));
 
+  // per event: the exact ordered command tails. subagent-gate stays FIRST on
+  // SubagentStop — the quality gate must run before memory ingests anything.
   const WANT = {
-    PostToolUse:  "hooks/ledger.sh hook",
-    SubagentStop: "hooks/subagent-gate.sh",
+    PostToolUse:  ["hooks/ledger.sh hook"],
+    SubagentStop: ["hooks/subagent-gate.sh", "hooks/memory.sh hook subagent-stop"],
+    Stop:         ["hooks/headless-driver.sh", "hooks/memory.sh hook stop"],
+    SessionStart: ["hooks/memory.sh hook session-start"],
   };
   const readme = fs.readFileSync(path.join(TG, "README.md"), "utf8");
-  for (const [event, tail] of Object.entries(WANT)) {
+  for (const [event, tails] of Object.entries(WANT)) {
     const cmds = cfg[event].flatMap(m => m.hooks).map(h => h.command);
-    if (cmds.length !== 1) fail(event + " registers " + cmds.length + " commands, expected 1");
-    const cmd = cmds[0];
-    if (!cmd.startsWith("bash ${CLAUDE_PLUGIN_ROOT}/"))
-      fail(event + " command does not use ${CLAUDE_PLUGIN_ROOT}: " + cmd);
-    if (!cmd.endsWith(tail)) fail(event + " command is not " + tail + ": " + cmd);
-    const script = tail.split(" ")[0];
-    if (!fs.existsSync(path.join(TG, script))) fail(tail + " points at a missing script");
-    if (!readme.includes(script)) fail("README install section does not name " + script);
+    if (cmds.length !== tails.length)
+      fail(event + " registers " + cmds.length + " commands, expected " + tails.length);
+    tails.forEach((tail, i) => {
+      const cmd = cmds[i];
+      if (!cmd.startsWith("bash ${CLAUDE_PLUGIN_ROOT}/"))
+        fail(event + " command does not use ${CLAUDE_PLUGIN_ROOT}: " + cmd);
+      if (!cmd.endsWith(tail)) fail(event + "[" + i + "] command is not " + tail + ": " + cmd);
+      const script = tail.split(" ")[0];
+      if (!fs.existsSync(path.join(TG, script))) fail(tail + " points at a missing script");
+      if (!readme.includes(script)) fail("README install section does not name " + script);
+    });
   }
 ' "$TG" 2>"$TMP/perr"; then
-  ok "plugin.json → hooks.json: PostToolUse=ledger, SubagentStop=gate, nothing else"
+  ok "plugin.json → hooks.json: ledger, gate+memory, stop-ingest, session-load — nothing else"
 else
   bad "plugin manifest invalid: $(cat "$TMP/perr")"
 fi
@@ -742,7 +757,7 @@ head2 "24. doctor.sh: healthy install PASSes, broken install names the failure"
 
 # (a) synthetic registration file carrying both hooks → every line PASS, exit 0
 GOOD="$TMP/doctor-good.json"
-printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bash x/hooks/ledger.sh hook"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$GOOD"
+printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bash x/hooks/ledger.sh hook"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"},{"type":"command","command":"bash x/hooks/memory.sh hook subagent-stop"}]}]}}\n' > "$GOOD"
 OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$GOOD" 2>&1); RC=$?
 [ "$RC" -eq 0 ] && grep -q 'DOCTOR PASS' <<< "$OUT" && ! grep -q '^  FAIL' <<< "$OUT" \
   && ok "healthy install → all PASS, DOCTOR PASS, exit 0" \
@@ -751,7 +766,7 @@ OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$GOOD" 2>&1); RC=$?
 # (b) same file with the PostToolUse/ledger entry removed → a FAIL line naming
 # the ledger hook, non-zero exit
 BADF="$TMP/doctor-bad.json"
-printf '{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"}]}]}}\n' > "$BADF"
+printf '{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bash x/hooks/subagent-gate.sh"},{"type":"command","command":"bash x/hooks/memory.sh hook subagent-stop"}]}]}}\n' > "$BADF"
 OUT=$(TG_DOCTOR_FAST=1 bash "$TG/hooks/doctor.sh" "$BADF" 2>&1); RC=$?
 [ "$RC" -ne 0 ] && ok "unwired ledger → exit $RC (non-zero)" || bad "doctor passed a broken install"
 grep -q 'FAIL  ledger hook' <<< "$OUT" \
@@ -855,6 +870,59 @@ grep -q 'plan-gate.sh' "$TG/agents/router.md" \
   && ok "orchestrator runs plan-gate before the approval question" \
   || bad "nothing ever runs plan-gate.sh"
 
+# ── 25b. plan-check.sh: PHASES parsed, projections recomputed, cap enforced ──
+head2 "25b. plan-check.sh: PHASES parsed, projections recomputed, cap enforced"
+PC="$TG/hooks/plan-check.sh"
+PCRUN="$TMP/plan-check-run"; mkdir -p "$PCRUN"
+
+# a good two-phase plan passes with the PLAN OK line the orchestrator pastes
+cat > "$PCRUN/plan.md" <<'EOF3'
+# Plan — fixture
+
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: ship the endpoint  tasks: [T1]  projected: 53  fits: yes
+phase 2: ship the ui  tasks: [T2]  projected: 53  fits: yes
+
+## Tasks
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'PLAN OK: 2 phases, max projection 53/60' <<< "$OUT" \
+  && ok "good fixture plan → PLAN OK with count and max/cap" || bad "good plan rejected (rc=$RC): $OUT"
+
+# missing PHASES block → bounced to Product
+printf '# Plan\n\n## Tasks\n' > "$PCRUN/plan.md"
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'PHASES block missing' <<< "$OUT" \
+  && ok "missing PHASES block → FAIL, named" || bad "missing block not caught: $OUT"
+
+# a projection the model got wrong is recomputed, not trusted
+cat > "$PCRUN/plan.md" <<'EOF3'
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: ship it  tasks: [T1,T2]  projected: 53  fits: yes
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'projected 53 != recomputed 80' <<< "$OUT" \
+  && ok "wrong projection → FAIL with the recomputed number" || bad "wrong arithmetic accepted: $OUT"
+
+# a phase over the cap fails with the number
+cat > "$PCRUN/plan.md" <<'EOF3'
+## PHASES
+budget_cap: 60
+projection_formula: 26 + 27*tasks
+phase 1: everything at once  tasks: [T1,T2,T3]  projected: 107  fits: yes
+EOF3
+OUT=$(bash "$PC" "$PCRUN" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'projected 107 over cap 60' <<< "$OUT" \
+  && ok "over-cap phase → FAIL with the number" || bad "over-cap phase accepted: $OUT"
+
+grep -q 'plan-check.sh' "$TG/agents/router.md" \
+  && ok "orchestrator runs plan-check before the approval question" \
+  || bad "nothing ever runs plan-check.sh"
+
 # ── 26. ledger cap: plan.json run_cap wins, 60 is the fallback ───────────────
 head2 "26. ledger cap: plan.json run_cap wins, 60 is the fallback"
 CRUN="$TMP/cap-run"; mkdir -p "$CRUN"
@@ -916,6 +984,380 @@ OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 printf '### CASE-3 — trivial\n- source: plan goal\n- expect_body: expect(true)\n' >> "$QRUN/test-cases.md"
 OUT=$(TG_RUN="$QRUN" bash "$GATE" 2>&1); RC=$?
 [ "$RC" -eq 1 ] && ok "expect(true)-style case → GATE FAIL" || bad "expect(true) case passed"
+
+# ── 31. backward compat: checklist shipped, rule A stated, manifest honest ───
+head2 "31. backward compat: checklist shipped, rule A stated, manifest honest"
+BC="$TG/skills/guardrails/breaking-changes.md"
+if [ -f "$BC" ]; then
+  ok "breaking-changes.md exists"
+  for h in '## Request contract' '## Response contract' '## Endpoints / routes' '## Code level' '## Data layer' '## Events / queues / jobs' '## Frontend'; do
+    grep -qF "$h" "$BC" && ok "checklist section $h" || bad "checklist missing $h"
+  done
+  grep -q 'INTENTIONAL BREAKING' "$BC" \
+    && ok "checklist names the declaration escape hatch" || bad "no INTENTIONAL BREAKING rule"
+else
+  bad "skills/guardrails/breaking-changes.md missing"
+fi
+# the checklist is loaded by the right agents — executor+QA+lead and both
+# reviewing challengers; a checklist nobody reads is a wish
+for a in executor qa lead qa-challenger lead-challenger; do
+  grep -q 'breaking-changes.md' "$TG/agents/$a.md" \
+    && ok "$a loads the breaking-change checklist" || bad "$a never reads the checklist"
+done
+# rule A: old tests are a contract — executor and QA both carry the block
+grep -q 'INTENTIONAL BREAKING' "$TG/agents/executor.md" \
+  && ok "executor carries rule A" || bad "executor missing rule A"
+grep -q 'INTENTIONAL BREAKING' "$TG/agents/qa.md" \
+  && ok "qa carries rule A" || bad "qa missing rule A"
+grep -q 'Rule A' "$TG/skills/guardrails/SKILL.md" \
+  && ok "guardrails skill carries rule A" || bad "guardrails missing rule A"
+
+# qa-manifest.sh: exit-code honest in both directions
+QM="$TG/hooks/qa-manifest.sh"
+QD="$TMP/qa-suite"; mkdir -p "$QD/curl" "$QD/browser"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$QD/curl/good.sh"
+printf '# manual: open the page\n' > "$QD/browser/home.md"
+printf 'curl/good.sh\nbrowser/home.md\n' > "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && grep -q 'REGRESSION PASS: 1 run, 1 skipped' <<< "$OUT" \
+  && ok "passing manifest → REGRESSION PASS with counts" || bad "green manifest failed (rc=$RC): $OUT"
+printf '#!/usr/bin/env bash\necho boundary case broke\nexit 1\n' > "$QD/curl/bad.sh"
+printf 'curl/bad.sh\n' >> "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'REGRESSION FAIL' <<< "$OUT" && grep -q 'curl/bad.sh' <<< "$OUT" \
+  && ok "failing entry → REGRESSION FAIL naming it" || bad "red manifest passed (rc=$RC)"
+printf 'curl/vanished.sh\n' > "$QD/regression.manifest"
+OUT=$(bash "$QM" "$QD" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && grep -q 'MISSING' <<< "$OUT" \
+  && ok "manifest entry with no file → FAIL, loud" || bad "shrunken suite passed silently"
+OUT=$(bash "$QM" "$TMP/no-such-qa-dir" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && ok "no manifest → exit 0, nothing to run" || bad "absent manifest blocked (rc=$RC)"
+grep -q 'qa-manifest.sh' "$TG/agents/qa.md" \
+  && ok "qa runs the manifest" || bad "nothing ever runs the regression manifest"
+grep -q 'regression.manifest' "$TG/agents/router.md" \
+  && ok "orchestrator confirms the ship-time append" || bad "manifest never grows on ship"
+
+# the fixture's second endpoint — the compat trap's substrate
+[ -f "$FIXTURE/src/checkout.ts" ] && [ -f "$FIXTURE/src/checkout.test.ts" ] \
+  && ok "fixture second endpoint (checkout) exists with its contract test" \
+  || bad "fixture second endpoint missing — compat trap has no substrate"
+grep -q "from './cart.js'" "$FIXTURE/src/checkout.ts" 2>/dev/null \
+  && ok "second endpoint depends on the first — a cart change can break it" \
+  || bad "checkout does not depend on cart; the trap cannot spring"
+
+# ── 30. challenger contracts: cheap, side-effect-free, refereed by the star ──
+head2 "30. challenger contracts: ≤5 calls, side_effect_free, verdicts, wired"
+for c in product-challenger lead-challenger qa-challenger; do
+  f="$TG/agents/$c.md"
+  if [ ! -f "$f" ]; then bad "$c.md missing"; continue; fi
+  grep -qE '^budget: ≤5 tool calls' "$f" \
+    && ok "$c budget is ≤5 tool calls" || bad "$c budget line wrong"
+  grep -q '^effect_policy: side_effect_free' "$f" \
+    && ok "$c is side_effect_free" || bad "$c effect_policy wrong"
+  grep -q 'never trees' "$f" \
+    && ok "$c is confined to artifacts + context maps" || bad "$c may read trees"
+done
+grep -q 'ACCEPT | REVISE' "$TG/agents/product-challenger.md" \
+  && ok "product-challenger speaks ACCEPT/REVISE" || bad "product-challenger verdict vocabulary missing"
+grep -q '≥2 alternative' "$TG/agents/product-challenger.md" \
+  && ok "generate mode requires ≥2 alternatives" || bad "no alternative floor in generate mode"
+grep -q 'names a solution path' "$TG/agents/product-challenger.md" \
+  && ok "user-path adoption rule present (verify-only, no alternatives)" \
+  || bad "user-path adoption rule missing from product-challenger"
+grep -q 'do not read Lead' "$TG/agents/lead-challenger.md" || grep -q 'not read Lead' "$TG/agents/lead-challenger.md" \
+  && ok "lead-challenger is blind to report.md" || bad "lead-challenger may read the first review"
+grep -q 'BEFORE any case executes' "$TG/agents/qa-challenger.md" \
+  && ok "qa-challenger reviews cases before execution" || bad "qa-challenger timing rule missing"
+grep -q 'breaking-changes.md' "$TG/agents/qa-challenger.md" \
+  && ok "qa-challenger walks the breaking-change checklist" || bad "qa-challenger ignores the checklist"
+# the orchestrator sequences all three; FAST never sees a challenger
+for c in product-challenger qa-challenger lead-challenger; do
+  grep -q "$c" "$TG/agents/router.md" \
+    && ok "router sequences $c" || bad "router never spawns $c"
+done
+grep -q 'challenger' "$TG/agents/solo-executor.md" \
+  && bad "FAST route mentions challengers — it must keep its single gate" \
+  || ok "FAST route untouched by challengers"
+grep -q 'One revision round' "$TG/agents/router.md" \
+  && ok "one revision round, then Irfan" || bad "revision rounds unbounded"
+grep -q 'same ledger' "$TG/agents/router.md" \
+  && ok "challenger calls counted in the same ledger" || bad "challenger calls escape the ledger"
+
+# ── 29. memory.sh: round-trip, never-blocks, log format, stale flag, inert ───
+head2 "29. memory.sh: deterministic round-trip, never blocks, log line, staleness"
+MEM="$TG/hooks/memory.sh"
+MREPO="$TMP/memrepo"; mkdir -p "$MREPO/src"
+git -C "$MREPO" init -q .
+echo 'export const a = 1' > "$MREPO/src/rates.ts"
+git -C "$MREPO" add -A && git -C "$MREPO" -c user.name=t -c user.email=t@t commit -qm base
+printf 'domain_rule|billing|src/rates.ts:1|invoices are charged in integer minor units\nbuild_behavior|test|init|`npm test` needs the fixture db up first\n# a comment\nnotakind|x|y|must be skipped\n' > "$MREPO/seed.txt"
+
+# ingest → retrieve round-trip on a fixture db
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false --source init ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "ingest exits 0" || bad "ingest rc=$RC"
+[ -f "$MREPO/.team-irfan/memory/product.db" ] && ok "product.db created" || bad "no product.db"
+OUT=$( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "how are invoices charged" )
+grep -q 'integer minor units' <<< "$OUT" \
+  && ok "retrieve finds the ingested fact by BM25" || bad "round-trip lost the fact: $OUT"
+grep -q '## MEMORY (retrieved, read-only' <<< "$OUT" \
+  && ok "retrieval block carries the read-only header" || bad "MEMORY header missing"
+grep -q 'must be skipped' <<< "$OUT" && bad "unknown kind ingested" || ok "unknown kind skipped"
+
+# hash dedup: ingesting the same artifact twice adds nothing
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false --source init ) >/dev/null 2>&1
+DUP=$( sqlite3 "$MREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" )
+[ "$DUP" = "2" ] && ok "hash dedup: re-ingest adds 0 rows (2 total)" || bad "dedup failed: $DUP rows"
+
+# compiled always-load view regenerated on ingest
+grep -q 'integer minor units' "$MREPO/.team-irfan/memory/product.md" 2>/dev/null \
+  && ok "compiled view product.md regenerated on ingest" || bad "compiled view missing/stale"
+
+# log-line format: every operation appends exactly the documented shape
+if grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z (ingest|retrieve|compile|compact|refresh) (product|lead|all) (ok|error) adds=[0-9]+ updates=[0-9]+ retires=[0-9]+ hits=[0-9]+ stale=[0-9]+ ms=[0-9]+( err=\S+)?$' \
+  "$MREPO/.team-irfan/memory/memory.log"; then
+  ok "memory.log lines match the documented format"
+else
+  bad "memory.log format wrong: $(head -2 "$MREPO/.team-irfan/memory/memory.log" 2>/dev/null)"
+fi
+grep -qE ' ingest product ok adds=2 ' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "first ingest logged adds=2" || bad "adds count not logged"
+
+# stale flagging: change the source file, retrieve again → [maybe-stale]
+echo 'export const a = 2' > "$MREPO/src/rates.ts"
+git -C "$MREPO" add -A && git -C "$MREPO" -c user.name=t -c user.email=t@t commit -qm change
+OUT=$( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "invoices minor units" )
+grep -q '\[maybe-stale\] \[domain_rule\]' <<< "$OUT" \
+  && ok "row with a changed source file gets [maybe-stale]" || bad "staleness not flagged: $OUT"
+grep -qE ' retrieve product ok .*stale=[1-9]' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "stale count reaches the log" || bad "stale=0 logged despite the flag"
+
+# never-blocks: a corrupted db still exits 0, with the error in the log
+printf 'garbage' > "$MREPO/.team-irfan/memory/product.db"
+( cd "$MREPO" && bash "$MEM" ingest --agent product --artifact seed.txt --infer false ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "corrupted db → ingest still exits 0" || bad "memory blocked the run (rc=$RC)"
+( cd "$MREPO" && bash "$MEM" retrieve --agent product --query "anything" ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "corrupted db → retrieve still exits 0" || bad "retrieve blocked (rc=$RC)"
+grep -qE ' (ingest|retrieve) product error .* err=' "$MREPO/.team-irfan/memory/memory.log" \
+  && ok "failure path logged with err=" || bad "silent failure — log has no error line"
+
+# unknown agent: memory is Product + Lead only, and still never blocks
+( cd "$MREPO" && bash "$MEM" ingest --agent qa --artifact seed.txt --infer false ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && [ ! -f "$MREPO/.team-irfan/memory/qa.db" ] \
+  && ok "qa gets no memory db, exit 0" || bad "qa.db created or blocked (rc=$RC)"
+
+# hook mode is inert without .tg-active — the load-bearing v2 invariant
+MHOOK="$TMP/memhook"; mkdir -p "$MHOOK"
+( cd "$MHOOK" && echo '{}' | bash "$MEM" hook subagent-stop ) ; RC=$?
+[ "$RC" -eq 0 ] && [ ! -d "$MHOOK/.team-irfan" ] \
+  && ok "hook inert with no .tg-active" || bad "memory hook fired outside a run (rc=$RC)"
+
+# retrieval injection is wired: the orchestrator retrieves before the spawn
+grep -q 'memory.sh retrieve --agent product' "$TG/agents/router.md" \
+  && ok "orchestrator retrieves product memory pre-spawn" || bad "product retrieval never wired"
+grep -q 'memory.sh retrieve --agent lead' "$TG/agents/router.md" \
+  && ok "orchestrator retrieves lead memory pre-spawn" || bad "lead retrieval never wired"
+grep -q 'init-lead' "$TG/agents/init.md" \
+  && ok "init seeds lead memory by running commands" || bad "init never seeds lead memory"
+grep -q 'ingest --agent product' "$TG/agents/init.md" \
+  && ok "init seeds product memory from the domain read" || bad "init never seeds product memory"
+
+# ── 32. memory infer + compact: Haiku proposes, the pipeline disposes ────────
+head2 "32. memory infer path: malformed JSON dropped, ops applied, compact caps"
+MEM="$TG/hooks/memory.sh"
+SHIM="$TMP/claude-shim"; mkdir -p "$SHIM"
+MIREPO="$TMP/mem-infer"; mkdir -p "$MIREPO"
+git -C "$MIREPO" init -q . && git -C "$MIREPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+printf '# Plan\n\nship the thing\n' > "$MIREPO/artifact.md"
+
+# (a) malformed JSON from the model → logged and dropped, zero rows, exit 0
+printf '#!/usr/bin/env bash\necho "this is not json at all"\n' > "$SHIM/claude"
+chmod +x "$SHIM/claude"
+( cd "$MIREPO" && PATH="$SHIM:$PATH" bash "$MEM" ingest --agent product --artifact artifact.md --infer true ) >/dev/null 2>&1
+RC=$?
+[ "$RC" -eq 0 ] && ok "malformed model output → exit 0" || bad "malformed JSON blocked the run (rc=$RC)"
+grep -q 'err=malformed-json-dropped' "$MIREPO/.team-irfan/memory/memory.log" \
+  && ok "malformed JSON logged as dropped" || bad "malformed JSON not logged"
+N=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" 2>/dev/null)
+[ "${N:-0}" = "0" ] && ok "no rows written from garbage" || bad "garbage produced $N rows"
+
+# (b) valid ops → applied with hash-dedup; the raw payload lands in ingest_log
+cat > "$SHIM/claude" <<'EOF4'
+#!/usr/bin/env bash
+echo '{"result":"[{\"op\":\"ADD\",\"kind\":\"decision\",\"text\":\"retries are capped at two per task\",\"tags\":\"retry\"},{\"op\":\"ADD\",\"kind\":\"decision\",\"text\":\"retries are capped at two per task\",\"tags\":\"retry\"},{\"op\":\"NOOP\"}]"}'
+EOF4
+chmod +x "$SHIM/claude"
+( cd "$MIREPO" && PATH="$SHIM:$PATH" bash "$MEM" ingest --agent product --artifact artifact.md --infer true ) >/dev/null 2>&1
+N=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM memories;" 2>/dev/null)
+[ "${N:-0}" = "1" ] && ok "ADD ops applied, duplicate hash-deduped (1 row)" || bad "expected 1 row, got $N"
+IL=$(sqlite3 "$MIREPO/.team-irfan/memory/product.db" "SELECT COUNT(*) FROM ingest_log;" 2>/dev/null)
+[ "${IL:-0}" -ge 1 ] && ok "raw ingestion payload kept in ingest_log" || bad "ingest_log empty"
+
+# (c) compact: expired rows retired, the active-row cap enforced
+DB="$MIREPO/.team-irfan/memory/product.db"
+sqlite3 "$DB" "INSERT INTO memories(text,kind,tags,source,created_at,updated_at,expires_at,status,hash)
+  VALUES ('temporary fact','gotcha','t','x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','active','exp1');"
+sqlite3 "$DB" "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 12)
+  INSERT INTO memories(text,kind,tags,source,created_at,updated_at,status,hash)
+  SELECT 'filler fact '||i,'preference','f','x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','active','fill'||i FROM n;"
+( cd "$MIREPO" && TG_MEM_ROW_CAP=5 bash "$MEM" compact --agent product ) >/dev/null 2>&1
+EXP=$(sqlite3 "$DB" "SELECT status FROM memories WHERE hash='exp1';")
+[ "$EXP" = "retired" ] && ok "compact retires expired rows" || bad "expired row still $EXP"
+ACT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE status='active';")
+[ "${ACT:-99}" -le 5 ] && ok "compact enforces the active-row cap ($ACT/5)" || bad "cap ignored: $ACT active"
+grep -qE ' compact product ok .*retires=[1-9]' "$MIREPO/.team-irfan/memory/memory.log" \
+  && ok "compact logged its retires" || bad "compact not logged"
+
+# (d) the extraction contract is fixed and ops-only — prompt text says so
+grep -q 'Return ONLY a JSON array' "$MEM" \
+  && ok "extraction prompt demands JSON ops only" || bad "extraction prompt is loose"
+grep -q 'claude -p --model haiku --output-format json' "$MEM" \
+  && ok "exactly one Haiku call, json output" || bad "infer path not haiku/json"
+# evaluation reads the log and reports memory health
+grep -q 'memory.log' "$TG/agents/evaluation.md" \
+  && ok "evaluation reads memory.log" || bad "evaluation ignores memory.log"
+grep -q 'memory hooks healthy' "$TG/agents/evaluation.md" \
+  && ok "evaluation states a plain memory verdict" || bad "no memory verdict in evaluation"
+
+# ── 33. benchmarks: compat trap scored, TG_BENCH_MODEL stamped, dims measured ─
+head2 "33. benchmarks: compat trap, TG_BENCH_MODEL stamping, measured dimensions"
+SC="$TMP/score33"; mkdir -p "$SC"
+printf 'verdict: FAIL\n\nBUG-1: the pre-existing checkout contract test breaks under the formatter change\n' > "$SC/trap-caught.md"
+printf 'verdict: PASS\n\nnew format tests all green\n' > "$SC/trap-missed.md"
+bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" >/dev/null 2>&1 \
+  && ok "scorer passes a report that caught the compat break" || bad "correct trap report failed"
+bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-missed.md" >/dev/null 2>&1 \
+  && bad "scorer passed a report blind to the broken endpoint" \
+  || ok "scorer fails the report that trusted the new tests alone"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+
+# extended dimensions come from measured artifacts, never typed
+DR="$TMP/dimrun"; mkdir -p "$DR"
+printf 'exec-1\nexec-1\nqa\n' > "$DR/ledger.log"
+printf '{"T1": 1}\n' > "$DR/retries.json"
+printf 'gate: unit tests ok\n\nGATE PASS\n' > "$DR/gate.out"
+printf 'REGRESSION PASS: 2 run, 0 skipped\n' > "$DR/reg.out"
+OUT=$(TG_SCORE_RUN="$DR" TG_SCORE_GATE="$DR/gate.out" TG_SCORE_REGRESSION="$DR/reg.out" \
+      TG_SCORE_WALL=421 TG_BENCH_MODEL=haiku \
+      bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" 2>/dev/null)
+node -e '
+  const s = JSON.parse(process.argv[1]);
+  const fail = m => { console.error(m); process.exit(1); };
+  if (s.tool_calls?.n !== 3 || s.tool_calls?.source !== "ledger") fail("tool_calls not ledger-sourced: " + JSON.stringify(s.tool_calls));
+  if (s.retries !== 1) fail("retries not read from retries.json");
+  if (s.gate !== "PASS") fail("gate result not read from gate output");
+  if (s.regression !== "PASS") fail("regression result not read");
+  if (s.wall_sec !== 421) fail("wall time lost");
+  if (s.bench_model !== "haiku") fail("bench_model not stamped");
+' "$OUT" && ok "score carries gate/regression/ledger-calls/retries/wall/bench_model" \
+         || bad "extended score dimensions wrong"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+# a transcript-sourced count is labeled as such — it is not a ledger number
+printf '{"num_turns": 42}\n' > "$DR/result.json"
+OUT=$(TG_SCORE_TRANSCRIPT="$DR/result.json" bash "$TG/benchmarks/run.sh" --score compat-trap "$SC/trap-caught.md" 2>/dev/null)
+node -e '
+  const s = JSON.parse(process.argv[1]);
+  if (s.tool_calls?.n !== 42 || !/transcript/.test(s.tool_calls?.source || "")) process.exit(1);
+' "$OUT" && ok "transcript count labeled, never passed off as a ledger" \
+         || bad "transcript count unlabeled"
+rm -f "$TG"/benchmarks/baselines/.last-*.json
+
+# metrics.sh stamps bench_model ONLY under TG_BENCH_MODEL
+BMRUN="$TMP/bm-run"; mkdir -p "$BMRUN"
+TG_BENCH_MODEL=sonnet bash "$TG/hooks/metrics.sh" "$BMRUN" FULL 3 60 shipped=true >/dev/null 2>&1
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).bench_model === "sonnet" ? 0 : 1)' "$BMRUN/metrics.json" \
+  && ok "TG_BENCH_MODEL=sonnet → bench_model stamped" || bad "bench_model not stamped"
+BMRUN2="$TMP/bm-run2"; mkdir -p "$BMRUN2"
+bash "$TG/hooks/metrics.sh" "$BMRUN2" FULL 3 60 shipped=true >/dev/null 2>&1
+node -e 'process.exit("bench_model" in JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")) ? 1 : 0)' "$BMRUN2/metrics.json" \
+  && ok "production metrics carry no bench_model" || bad "bench_model leaked into production metrics"
+grep -q 'TG_BENCH_MODEL' "$TG/agents/router.md" \
+  && ok "router honors the uniform benchmark override" || bad "router ignores TG_BENCH_MODEL"
+grep -q 'TG_BENCH_MODEL' "$TG/benchmarks/harness-v3/README.md" \
+  && ok "harness README documents the matrix override" || bad "TG_BENCH_MODEL undocumented"
+
+# ── 34. headless reliability: the 2026-08-19 haiku run's three failure modes ─
+# T3 forfeited 3/3 (refused with answers shipped), T2 stalled 3/3 at an
+# auto-approved gate, T1 mis-routed a one-liner FULL. These pins hold the fixes.
+head2 "34. headless: clarifications consumed, auto-approve keeps driving, 1-sentence bugfix is FAST"
+grep -q 'refusing on ambiguity, check for' "$TG/agents/router.md" \
+  && ok "router reads shipped clarifications before HAND-BACK" \
+  || bad "router can refuse a task that shipped its answers (T3 failure mode)"
+grep -q 'do not end the turn' "$TG/agents/router.md" \
+  && ok "auto-approved gate forbids ending the turn" \
+  || bad "auto-approve can still stall at the gate (T2 failure mode)"
+grep -q 'the sentence is the acceptance criterion' "$TG/agents/router.md" \
+  && ok "one-sentence bugfix pinned to FAST" \
+  || bad "FAST rubric lost the one-sentence-bugfix rule (T1 mis-triage)"
+grep -q 'clarifications.md' "$TG/benchmarks/harness-v3/bin/run.sh" \
+  && ok "harness ships clarifications.md into every worktree" \
+  || bad "headless arms have no way to read the task's answers"
+CLAR=$(grep -c 'clarifications\.md' "$TG/benchmarks/harness-v3/bin/score.sh" || true)
+[ "${CLAR:-0}" -ge 2 ] \
+  && ok "scorer excludes clarifications.md from diff and scope counts" \
+  || bad "harness-placed clarifications.md would score as an agent edit"
+
+# ── 35. headless driver: turn persistence is a hook, not a prompt ───────────
+# The 2026-08-20 run showed the prompt-only fix insufficient: 3 cells ended
+# the turn with zero subagents spawned, 1 asked a BLOCKING question at the
+# auto-approved gate, 1 shipped a correct fix that failed only lint.
+head2 "35. headless driver + no blocking questions + gate lint + conditional challenger"
+[ -x "$TG/hooks/headless-driver.sh" ] \
+  && ok "headless-driver.sh exists and is executable" || bad "no headless driver"
+grep -q 'headless-driver.sh' "$TG/hooks/hooks.json" \
+  && ok "driver registered on Stop" || bad "driver not wired into hooks.json"
+grep -q 'TEAM_IRFAN_AUTO_APPROVE' "$TG/hooks/headless-driver.sh" \
+  && ok "driver scoped to auto-approve sessions only" || bad "driver could fire interactively"
+grep -q 'BLOCKING questions are forbidden' "$TG/agents/router.md" \
+  && ok "auto-approve forbids blocking questions" || bad "gate can still stall on a question (T3 r2)"
+grep -q 'gate: lint' "$TG/hooks/gate.sh" \
+  && ok "gate.sh runs lint (guardrails layer 1)" || bad "gate narrower than the external gate (T1 r1)"
+grep -q 'challenger: skipped (low-risk)' "$TG/agents/router.md" \
+  && ok "challenger round conditional on plan risk" || bad "challengers unconditional"
+grep -q 'test/\*\*' "$TG/benchmarks/harness-v3/tasks/T3/scope.allowlist" \
+  && ok "T3 allowlist admits the mandated tests" || bad "bench scope contradicts guardrails on T3"
+
+# functional: the driver against synthetic transcripts, in a scratch cwd
+DRV="$TG/hooks/headless-driver.sh"
+DTMP="$TMP/driver"; mkdir -p "$DTMP"; pushd "$DTMP" >/dev/null
+TR="$DTMP/tr.jsonl"
+mktr() { printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":$1}]}}" > "$TR"; }
+IN="{\"transcript_path\":\"$TR\",\"session_id\":\"drv-test\"}"
+
+mktr '"ROUTE: FAST\nDelegating to solo executor."'
+printf '%s' "$IN" | bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "driver silent without TEAM_IRFAN_AUTO_APPROVE" || bad "driver fired interactively"
+
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 2 ] && ok "FAST with no Verdict → blocked" || bad "zero-spawn FAST stop not blocked (T4 r2)"
+
+mktr '"ROUTE: FAST\n**Verdict:** shipped — done."'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "FAST with Verdict → allowed" || bad "driver blocks a finished FAST run"
+
+mktr '"ROUTE: FULL\nProceeding to Product planning phase."'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 2 ] && ok "FULL with no handoff → blocked" || bad "zero-spawn FULL stop not blocked (T2 r1/r2)"
+
+mkdir -p .team-irfan/handoffs && touch .team-irfan/handoffs/x.md
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "FULL with handoff → allowed" || bad "driver blocks a finished FULL run"
+
+mktr '"HAND-BACK — faster manually: no acceptance criterion"'
+rm -rf .team-irfan
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "HAND-BACK → driver stays out" || bad "driver blocks a designed refusal"
+
+mktr '"ROUTE: FULL\nstall"'
+rm -rf .team-irfan; mkdir -p .team-irfan/.driver; echo 25 > .team-irfan/.driver/drv-test.count
+printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "block cap reached → allowed (no infinite loop)" || bad "driver can loop forever"
+popd >/dev/null
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

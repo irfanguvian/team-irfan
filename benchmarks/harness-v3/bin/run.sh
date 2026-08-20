@@ -22,7 +22,18 @@ MAX_TURNS="${MAX_TURNS:-150}"
 # Pinned explicitly: arm A has an empty settings.json and would otherwise take the
 # CLI default, while arms B and C inherit the operator's "model": "opus". Same
 # model in every arm is the whole premise.
-MODEL="${BENCH_MODEL:-claude-opus-5}"
+#
+# TG_BENCH_MODEL=haiku|sonnet runs the harness×model matrix: it pins --model on
+# every arm AND is exported into arm C, where the router overrides its per-node
+# matrix uniformly and metrics.sh stamps bench_model into metrics.json. The
+# production matrix keeps `haiku: never`; only this variable ever bypasses it,
+# and every number it produces is labeled.
+case "${TG_BENCH_MODEL:-}" in
+  haiku)  MODEL="claude-haiku-4-5-20251001" ;;
+  sonnet) MODEL="claude-sonnet-5" ;;
+  "")     MODEL="${BENCH_MODEL:-claude-opus-5}" ;;
+  *)      echo "run.sh: TG_BENCH_MODEL must be haiku or sonnet, got ${TG_BENCH_MODEL}" >&2; exit 1 ;;
+esac
 DRY=0
 
 # Fastest expected first: a one-liner, then a localised fix, then a feature,
@@ -69,29 +80,65 @@ run_cell() {
 
   mkdir -p "$out" "$WT_ROOT"
   setup_worktree "$task" "$arm" "$round" "$wt"
+  # Every arm gets the pre-answered interview at the worktree root, byte for
+  # byte — headless runs have no operator to answer clarifying questions, and
+  # refusal-on-ambiguity would otherwise be a forfeit. score.sh excludes it.
+  cp "$H/tasks/$task/clarifications.md" "$wt/clarifications.md" 2>/dev/null || true
   echo "$wt" > "$out/worktree.path"
 
-  local start end status=ok
+  local start end status rc=0
   start=$(date +%s)
   (
     cd "$wt"
     CLAUDE_CONFIG_DIR="$H/configs/$arm" \
     TEAM_IRFAN_AUTO_APPROVE=1 \
+    TG_BENCH_MODEL="${TG_BENCH_MODEL:-}" \
     DATABASE_URL="file:./bench-$arm-$round.db" \
     API_KEY=bench-key \
       claude "${flags[@]}" <<< "$prompt"
   ) > "$out/result.json" 2> "$out/stderr.log" &
   local pid=$!
-  ( sleep "$MAX_SEC"; kill -TERM "$pid" 2>/dev/null ) & local killer=$!
-  wait "$pid"; local rc=$?
-  kill "$killer" 2>/dev/null
+  # claude -p prints one final {"type":"result"} object — but plugins (the
+  # OMC daemon) can keep the process alive AFTER that write, so waiting on
+  # the pid alone turns every finished cell into fail(timeout) at MAX_SEC.
+  # Measured: a cell that completed in 113s was recorded 3230s. Poll for the
+  # terminal object instead, then reap the cell's whole tree.
+  status="fail(timeout)"
+  while :; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null; rc=$?
+      status=ok; [ "$rc" -ne 0 ] && status="fail(rc=$rc)"
+      break
+    fi
+    if [ -s "$out/result.json" ] && tail -c 4000 "$out/result.json" | grep -q '"type":"result"'; then
+      status=ok
+      break
+    fi
+    [ $(( $(date +%s) - start )) -ge "$MAX_SEC" ] && break
+    sleep 5
+  done
+  # a terminal object that reports an API error is a failed measurement, not
+  # a result — label it so the retry pass picks it up
+  if [ "$status" = ok ] && tail -c 4000 "$out/result.json" 2>/dev/null \
+       | grep -q '"terminal_reason":"api_error"'; then
+    status="fail(api_error)"
+  fi
+  # reap children and grandchildren (claude + any daemon it spawned)
+  local kids c
+  kids=$(pgrep -P "$pid" 2>/dev/null)
+  for c in $kids; do pkill -TERM -P "$c" 2>/dev/null; done
+  pkill -TERM -P "$pid" 2>/dev/null; kill -TERM "$pid" 2>/dev/null
+  sleep 1
+  for c in $kids; do pkill -KILL -P "$c" 2>/dev/null; done
+  pkill -KILL -P "$pid" 2>/dev/null; kill -KILL "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
   end=$(date +%s)
-  [ "$rc" -ne 0 ] && status="fail(rc=$rc)"
-  [ $((end - start)) -ge "$MAX_SEC" ] && status="fail(timeout)"
 
   jq -n --arg t "$task" --arg a "$arm" --arg r "$round" --arg s "$status" \
         --argjson w $((end - start)) --arg wt "$wt" \
-    '{task:$t,arm:$a,round:$r,status:$s,wall_sec:$w,worktree:$wt}' > "$out/meta.json"
+        --arg bm "${TG_BENCH_MODEL:-}" --arg m "$MODEL" \
+    '{task:$t,arm:$a,round:$r,status:$s,wall_sec:$w,worktree:$wt,model:$m,
+      bench_model:(if $bm == "" then null else $bm end)}' > "$out/meta.json"
   echo "[$task/$arm/$round] $status  $((end - start))s"
 }
 
@@ -121,4 +168,21 @@ for task in ${TASKS//,/ }; do
     wait "${pids[@]}"
   done
 done
+
+# One automatic re-run for every failed cell (sequential — a failure burst is
+# often transient API/DNS weather, and re-running it in parallel re-creates
+# the burst). TG_BENCH_RETRY=0 disables. A cell failing twice stays failed.
+if [ "${TG_BENCH_RETRY:-1}" != "0" ]; then
+  for task in ${TASKS//,/ }; do
+    for arm in ${ARMS//,/ }; do
+      for r in $(seq 1 "$ROUNDS"); do
+        st=$(jq -r '.status // "missing"' "$H/runs/$task/$arm/$r/meta.json" 2>/dev/null || echo missing)
+        case "$st" in
+          ok) ;;
+          *) echo "=== retry $task/$arm/$r (was: $st) ==="; run_cell "$task" "$arm" "$r" ;;
+        esac
+      done
+    done
+  done
+fi
 echo "done. score with: bin/score.sh all"

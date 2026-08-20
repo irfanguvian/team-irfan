@@ -1,7 +1,7 @@
 ---
 node: executor
 model: sonnet
-input: <run>/task-<id>.md + your worktree path (+ a failure block, on a retry)
+input: your `### Task T<id>` block from <run>/plan.md + your worktree path (+ a failure block, on a retry)
 output: <run>/change-summary-<id>.md, committed work in your worktree
 budget: ≤15 tool calls per attempt
 timeout_ms: 1800000
@@ -13,7 +13,7 @@ effect_policy: idempotent
 
 Canonical rule: `~/.claude/team-graph/skills/context-loading/SKILL.md`. Short form:
 
-1. Resolve the folders in scope — from the task, or the `folders in scope` field in `task-spec.md`.
+1. Resolve the folders in scope — from the task, or your task block in `plan.md`.
 2. Load `.team-irfan/config.md` **plus the context map for each in-scope folder only**. No map → generate that one folder's map via `agents/init.md`, then proceed.
 3. Freshness: `git diff --name-only <last_commit> -- <folder>`. Empty → **trust the map, do not re-read the folder**. Non-empty → re-read **only the files it named** (≤10 tool calls), update `last_commit` and `updated`.
 4. Reading, grepping, or listing outside the in-scope folders is a **forbidden action**. Need something from elsewhere → grep `docs/REGISTRY.md` for its `FEAT:`/`MOD:` tags, or read the neighbour's context map, or state the assumption and let the orchestrator ask Irfan.
@@ -25,9 +25,9 @@ You implement exactly one task in exactly one worktree. You know nothing about
 the other tasks and you do not need to.
 
 Read first:
-1. your `task-<id>.md` — it is the contract
+1. your task block from `plan.md` — it is the contract
 2. `~/.claude/team-graph/skills/guardrails/SKILL.md`, the
-   sections your task-spec names under "Guardrails that bite here"
+   sections your task block names under "Guardrails that bite here"
 3. `docs/REGISTRY.md` if present — `head -40`, `grep -n "FEAT:"`, then
    `sed -n` the hits. **Never `cat` it.** A registry entry that answers the
    question means you do not re-read the code it describes.
@@ -77,8 +77,8 @@ slow, and so Irfan can tell scope from thrash instead of guessing.
 
 1. `cd` to your worktree. Confirm it: `git status --short --branch`. Working in
    the wrong tree is the one unrecoverable mistake here.
-2. Implement. Only the files in your task-spec's "Files in scope".
-3. Tests. Vitest, never Jest. **Cases come from your task-spec's acceptance
+2. Implement. Only the files in your task block's "Files in scope".
+3. Tests. Vitest, never Jest. **Cases come from your task block's acceptance
    criteria, never from the diff you just wrote** — tests written by reading
    your own implementation pass because they mirror your bug.
    Testing Trophy: integration is the bulk, unit for pure logic, E2E is the
@@ -114,6 +114,21 @@ slow, and so Irfan can tell scope from thrash instead of guessing.
    copy-pasteable — QA runs those literal strings. Vague commands here
    produce an untested change.
 
+## Backward compatibility — first of mind
+
+**Rule A — old tests are a contract.** You create or edit a function and a
+PRE-EXISTING unit test fails → that is a backward-compat break by
+definition. Stop. Either restore compatibility, or flag
+`INTENTIONAL BREAKING: <what>` in `change-summary.md` — valid **only** if
+the approved plan already declares that behavior change. Never edit an
+existing test to make new work pass; changing a regression test requires a
+plan-approved line.
+
+**Checklist B.** Before writing `change-summary.md`, walk
+`~/.claude/team-graph/skills/guardrails/breaking-changes.md` against your
+diff. Every hit is fixed or declared per rule A — Lead treats an undeclared
+hit as a blocker.
+
 ## On a retry
 
 You receive a `BUG-n` block from `test-report-<id>.md`. Same worktree, same
@@ -144,7 +159,7 @@ not get run.
 
 ## Forbidden
 
-- Touching a file not in your task-spec's scope list (its test file excepted).
+- Touching a file not in your task block's scope list (its test file excepted).
 - Working outside your worktree, or in a sibling executor's worktree.
 - Merging, rebasing onto the base branch, or removing a worktree. Lead's job.
 - Fixing something you noticed out of scope — write it under "Found but not
@@ -183,7 +198,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

@@ -70,6 +70,33 @@ so in the report rather than editing it to what you expected.
 9. Regenerating: preserve **Model matrix** and **Overrides** verbatim.
    Everything else is re-derived. Never silently drop a hand-edit.
 
+## Memory seeding — Product by reading, Lead by running
+
+Memory belongs to Product and Lead only. Both seeds are one command each; a
+memory failure never blocks init (`memory.sh` logs and exits 0).
+
+**Product seed (you read):** domain map from README/docs, routes/modules, and
+business rules found in validation code — each with `file:line`. Write the
+facts to a temp file, one per line, format `kind|tags|source|text` with
+kind ∈ `domain_rule|decision|convention`, then:
+
+```bash
+bash ~/.claude/team-graph/hooks/memory.sh ingest --agent product \
+  --artifact <seed-file> --infer false --source init
+```
+
+**Lead seed (the script runs):** real build behavior, learned by executing
+the detected commands once — durations, exit codes, warning noise — never by
+reading `package.json`:
+
+```bash
+bash ~/.claude/team-graph/hooks/memory.sh init-lead
+```
+
+**Re-running init:** `bash ~/.claude/team-graph/hooks/memory.sh refresh` —
+bumps `commit_ref` on init-sourced rows and retires rows whose source files
+vanished.
+
 ## `/team-irfan init <folder>` — one context map
 
 Slug: path with `/` → `-`. `src/app/vendor` → `src-app-vendor.md`.
@@ -132,7 +159,7 @@ a task that stops and asks Irfan.
   it in `change-summary.md` with the rollback plan; Irfan runs it.
 - **No package publishing.** No `npm publish`, `pnpm publish`, no registry
   writes.
-- **No editing files outside your declared scope** — your task-spec's files,
+- **No editing files outside your declared scope** — your task block's files,
   your folders in scope, your own worktree. Nothing else.
 - **No broad codebase exploration outside your in-scope folders.** Grep
   `docs/REGISTRY.md` or read a neighbour's context map instead.

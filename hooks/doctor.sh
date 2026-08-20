@@ -42,6 +42,13 @@ else
   fail "hook registration file not found: $SETTINGS"
 fi
 
+# 2b — memory hook registered (v3): SubagentStop/Stop ingest via memory.sh
+if [ -f "$SETTINGS" ]; then
+  grep -q 'memory\.sh hook' "$SETTINGS" \
+    && pass "memory hook registered in $SETTINGS" \
+    || fail "memory hook (hooks/memory.sh hook ...) not registered in $SETTINGS"
+fi
+
 # 3 — fixture deps, without which run-checks refuses to run
 [ -d "$TG/tests/fixture/node_modules" ] \
   && pass "fixture deps installed" \
@@ -59,6 +66,20 @@ LINES=$(wc -l < "$PROBE/run/ledger.log" 2>/dev/null | tr -d ' ')
 [ "${LINES:-0}" = "1" ] \
   && pass "ledger wiring probe (1 payload → 1 ledger.log line)" \
   || fail "ledger probe wrote ${LINES:-0} lines, expected 1"
+
+# 4b — memory wiring probe: one fact in, one hit back, one log line, in a
+# throwaway dir. Deterministic; no LLM, no project state touched.
+MPROBE="$PROBE/mem"
+mkdir -p "$MPROBE"
+printf 'gotcha|probe|init|doctor probe fact about the widget frobnicator\n' > "$MPROBE/seed.txt"
+( cd "$MPROBE" && bash "$TG/hooks/memory.sh" ingest --agent product --artifact seed.txt --infer false >/dev/null 2>&1 )
+MOUT=$( cd "$MPROBE" && bash "$TG/hooks/memory.sh" retrieve --agent product --query "widget frobnicator" 2>/dev/null )
+grep -q 'doctor probe fact' <<< "$MOUT" \
+  && pass "memory probe (ingest → retrieve round-trip)" \
+  || fail "memory probe failed — memory.sh ingest/retrieve broken"
+grep -qE ' ingest product ok ' "$MPROBE/.team-irfan/memory/memory.log" 2>/dev/null \
+  && pass "memory.log records the probe ingest" \
+  || fail "memory.log missing or unparseable after probe"
 
 # 5 — both hooks inert without the marker: the isolation every other workflow
 # on this machine depends on
