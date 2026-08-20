@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  id       Int       @id @default(autoincrement())
+  name     String
+  email    String    @unique
+  timeZone String    @default("UTC")
+  invoices Invoice[]
+}
+
+model Invoice {
+  id         Int      @id @default(autoincrement())
+  number     String   @unique
+  amountCents Int
+  currency   String   @default("IDR")
+  status     String   @default("open")
+  createdAt  DateTime @default(now())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id])
+  refunds    Refund[]
+
+  @@index([createdAt])
+  @@index([customerId])
+}
+
+model Refund {
+  id          Int      @id @default(autoincrement())
+  amountCents Int
+  reason      String
+  createdAt   DateTime @default(now())
+  invoiceId   Int
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId, createdAt])
+}
+
+model Transaction {
+  id          Int      @id @default(autoincrement())
+  amountCents Int
+  occurredAt  DateTime
+  customerId  Int
+}
