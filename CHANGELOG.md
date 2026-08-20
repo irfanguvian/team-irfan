@@ -109,6 +109,33 @@ preserved — and now checked harder (306 checks, up from 205).
   pre-existing `checkout` endpoint); `run.sh --score` extended with measured
   dimensions (gate, regression, ledger tool calls vs labeled transcript
   counts, retries, wall time). Fixture gained the second endpoint.
+## benchmarks: harness v4 — 2026-08-20
+
+Not a workflow change — a measurement change. `benchmarks/harness-v3` is
+**superseded for conclusions** (its four tasks saturated at 100% pass for every
+arm, leaving only cost — an axis v4 deliberately reports but does not score);
+its runs stay as the record. `benchmarks/harness-v4` scores the five claims
+team-irfan is built on, each with a pre-registered falsifier:
+
+- **C1 verify-driven reliability** — `false_done` + `verified_before_done`
+  from the transcript, against hidden acceptance.
+- **C2 plan-then-execute** — `plan_exists` / `plan_adherence` / `replans`;
+  baselines' null adherence is reported as "did not plan", which is the claim.
+- **C3 predictable effort** — plan's `expected_calls` vs actual, cross-round
+  cost spread; capped runs are scored, not discarded.
+- **C4 memory** — MEM-A/MEM-B two-session protocol on one persistent clone;
+  within-arm discount plus a judged `same_hole` check.
+- **C5 generated quality** — pairwise blind order-swapped LLM review, gated by
+  a 3-pair calibration (`judge.sh --calibrate`) that must pass first.
+
+New tasks: Q1 (pure question — any diff fails), F1 (v3's T1, the harness-tax
+canary), N5 (five seeded N+1s across five modules, contract-pinned), B1
+(shared-util band-aid trap with two hidden consumers), MEM pair. Fixture gains
+`customers`, `refunds`, `audit` modules; each task state is a single orphan
+commit so `git log` leaks nothing. Runner is strictly sequential (lockfile),
+resumable (`status.sh`, `run.sh all` skips finished cells), atomic per cell.
+Scorer proven by `bin/selftest.sh` (8 graded cases incl. the band-aid and
+3-of-5 traps); `extract.py` unit-tested against committed sample transcripts.
 
 ---
 

@@ -510,8 +510,10 @@ hooks/       gate.sh · plan-gate.sh · plan-check.sh · retry-guard.sh
              subagent-gate.sh · ledger.sh · memory.sh · qa-manifest.sh
              reap.sh · run-state.sh · metrics.sh · init-scaffold.sh · doctor.sh
 lib/         atomic.sh   shared write primitives (atomic replace, lock)
-benchmarks/  run.sh + tester/{fixtures,ground-truth} + baselines/  — plus
-             harness-v3/, the three-arm harness×model matrix (see below)
+benchmarks/  run.sh + tester/{fixtures,ground-truth} + baselines/
+             does a prompt diff help? — with a number, not an opinion
+             harness-v4/   the five falsifiable claims, three arms
+             harness-v3/   superseded for conclusions, kept as the record
 skills/      guardrails/   engineering rules every node obeys, plus
                            breaking-changes.md — the compat checklist
              context-loading/   the map-first rule
@@ -619,6 +621,13 @@ harness ∈ {bare Claude Code, OMC, team-irfan} × model ∈ {haiku, sonnet} via
 `TG_BENCH_MODEL`, 3 rounds each, same model across arms within a round, with
 feature tasks scored against ground-truth diffs and a backward-compat trap
 (T3) that fails hard no matter how fast the result is.
+
+The three-arm harness lives in `benchmarks/harness-v4/` (see its README): five
+falsifiable claims — verify-driven reliability, plan-then-execute, predictable
+effort, cross-session memory, generated quality — scored on trap tasks with
+hidden acceptance and a calibrated blind pairwise judge. Cost is reported, not
+scored. `benchmarks/harness-v3/` is superseded for conclusions (its tasks
+saturated) and kept as the record.
 
 ---
 

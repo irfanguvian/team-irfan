@@ -1,5 +1,11 @@
 # Harness Benchmark v3
 
+> **Superseded for conclusions by [`../harness-v4/`](../harness-v4/README.md)
+> (2026-08-20).** v3's tasks saturated at 100% hidden-test pass for every arm,
+> collapsing the scoreboard to cost — an axis an orchestration layer can only
+> lose and v4 deliberately does not score. The runs and numbers below stay as
+> the record of that finding; draw no team-irfan verdict from them.
+
 Head-to-head: **team-irfan** vs **bare Claude Code** vs **OMC**. Same model, same
 repo, same task text.
 
