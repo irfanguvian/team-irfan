@@ -1,0 +1,42 @@
+diff -ruN a/src/common/date.util.ts b/src/common/date.util.ts
+--- a/src/common/date.util.ts	2026-08-20 19:50:17
++++ b/src/common/date.util.ts	2026-08-20 19:50:17
+@@ -2,6 +2,11 @@
+  * Calendar-day bucket for an instant, as seen from a given IANA time zone.
+  * Returns an ISO date string, e.g. "2026-03-03".
+  */
+-export function dayKeyInZone(instant: Date, _timeZone: string): string {
+-  return instant.toISOString().slice(0, 10);
++export function dayKeyInZone(instant: Date, timeZone: string): string {
++  return new Intl.DateTimeFormat('en-CA', {
++    timeZone,
++    year: 'numeric',
++    month: '2-digit',
++    day: '2-digit',
++  }).format(instant);
+ }
+diff -ruN a/test/reports.dst.spec.ts b/test/reports.dst.spec.ts
+--- a/test/reports.dst.spec.ts	1970-01-01 07:00:00
++++ b/test/reports.dst.spec.ts	2026-08-20 19:50:17
+@@ -0,0 +1,21 @@
++import request from 'supertest';
++import { afterAll, beforeAll, expect, it } from 'vitest';
++import { API_KEY, bootstrap, TestApp } from './helpers/app';
++
++let ctx: TestApp;
++beforeAll(async () => { ctx = await bootstrap(); });
++afterAll(async () => { await ctx.close(); });
++
++it('groups a Pacific/Auckland customer by their local day', async () => {
++  const customer = await ctx.prisma.customer.findFirstOrThrow({
++    where: { timeZone: 'Pacific/Auckland' },
++  });
++  const res = await request(ctx.app.getHttpServer())
++    .get(`/reports/daily/${customer.id}`)
++    .set('x-api-key', API_KEY)
++    .expect(200);
++  expect(res.body.days).toEqual([
++    { day: '2026-03-02', totalCents: 8000, count: 1 },
++    { day: '2026-03-03', totalCents: 16000, count: 1 },
++  ]);
++});

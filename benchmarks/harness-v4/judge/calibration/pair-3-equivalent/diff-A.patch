@@ -1,0 +1,70 @@
+diff -ruN a/src/invoices/invoices.service.ts b/src/invoices/invoices.service.ts
+--- a/src/invoices/invoices.service.ts	2026-08-20 20:01:09
++++ b/src/invoices/invoices.service.ts	2026-08-20 20:01:09
+@@ -14,25 +14,20 @@
+       skip,
+       take: limit,
+       orderBy: { createdAt: 'desc' },
++      include: { customer: true },
+     });
+ 
+-    const data = [];
+-    for (const invoice of invoices) {
+-      const customer = await this.prisma.customer.findUnique({
+-        where: { id: invoice.customerId },
+-      });
+-      data.push({
+-        id: invoice.id,
+-        number: invoice.number,
+-        amountCents: invoice.amountCents,
+-        currency: invoice.currency,
+-        status: invoice.status,
+-        createdAt: invoice.createdAt.toISOString(),
+-        customer: customer
+-          ? { id: customer.id, name: customer.name, email: customer.email }
+-          : null,
+-      });
+-    }
++    const data = invoices.map((invoice) => ({
++      id: invoice.id,
++      number: invoice.number,
++      amountCents: invoice.amountCents,
++      currency: invoice.currency,
++      status: invoice.status,
++      createdAt: invoice.createdAt.toISOString(),
++      customer: invoice.customer
++        ? { id: invoice.customer.id, name: invoice.customer.name, email: invoice.customer.email }
++        : null,
++    }));
+ 
+     const total = await this.prisma.invoice.count();
+ 
+diff -ruN a/test/invoices.queries.spec.ts b/test/invoices.queries.spec.ts
+--- a/test/invoices.queries.spec.ts	1970-01-01 07:00:00
++++ b/test/invoices.queries.spec.ts	2026-08-20 20:01:09
+@@ -0,0 +1,25 @@
++import request from 'supertest';
++import { afterAll, beforeAll, expect, it } from 'vitest';
++import { API_KEY, bootstrap, TestApp } from './helpers/app';
++
++let ctx: TestApp;
++let selects = 0;
++beforeAll(async () => {
++  ctx = await bootstrap();
++  ctx.prisma.$on('query', (e: { query: string }) => {
++    if (/^\s*SELECT/i.test(e.query)) selects += 1;
++  });
++});
++afterAll(async () => { await ctx.close(); });
++
++it('serves a 50-invoice page with customers in at most 3 SELECTs', async () => {
++  selects = 0;
++  const res = await request(ctx.app.getHttpServer())
++    .get('/invoices?page=1&limit=50')
++    .set('x-api-key', API_KEY)
++    .expect(200);
++  await new Promise((r) => setTimeout(r, 250));
++  expect(res.body.data).toHaveLength(50);
++  expect(res.body.data[0].customer.email).toBeTruthy();
++  expect(selects).toBeLessThanOrEqual(3);
++});

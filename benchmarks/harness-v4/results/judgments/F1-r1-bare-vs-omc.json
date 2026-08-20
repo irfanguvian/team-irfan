@@ -1,0 +1,11 @@
+{
+  "task": "F1",
+  "round": "1",
+  "arms": [
+    "bare",
+    "omc"
+  ],
+  "winner": "bare",
+  "passes": "1|2|X",
+  "judge_model": "claude-opus-5"
+}

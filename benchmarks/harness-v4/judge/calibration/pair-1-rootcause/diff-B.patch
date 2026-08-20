@@ -1,0 +1,15 @@
+diff -ruN a/src/reports/reports.service.ts b/src/reports/reports.service.ts
+--- a/src/reports/reports.service.ts	2026-08-20 19:50:17
++++ b/src/reports/reports.service.ts	2026-08-20 19:50:17
+@@ -54,7 +54,10 @@
+   private bucketByDay(transactions: Transaction[], timeZone: string) {
+     const buckets = new Map<string, { day: string; totalCents: number; count: number }>();
+     for (const tx of transactions) {
+-      const day = dayKeyInZone(tx.occurredAt, timeZone);
++      let day = dayKeyInZone(tx.occurredAt, timeZone);
++      if (timeZone === 'Asia/Jakarta') {
++        day = new Date(tx.occurredAt.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
++      }
+       const bucket = buckets.get(day) ?? { day, totalCents: 0, count: 0 };
+       bucket.totalCents += tx.amountCents;
+       bucket.count += 1;

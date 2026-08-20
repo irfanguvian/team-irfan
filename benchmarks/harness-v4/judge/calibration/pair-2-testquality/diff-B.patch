@@ -1,0 +1,64 @@
+diff -ruN a/src/invoices/invoices.service.ts b/src/invoices/invoices.service.ts
+--- a/src/invoices/invoices.service.ts	2026-08-20 19:50:17
++++ b/src/invoices/invoices.service.ts	2026-08-20 19:50:17
+@@ -14,25 +14,20 @@
+       skip,
+       take: limit,
+       orderBy: { createdAt: 'desc' },
++      include: { customer: true },
+     });
+ 
+-    const data = [];
+-    for (const invoice of invoices) {
+-      const customer = await this.prisma.customer.findUnique({
+-        where: { id: invoice.customerId },
+-      });
+-      data.push({
+-        id: invoice.id,
+-        number: invoice.number,
+-        amountCents: invoice.amountCents,
+-        currency: invoice.currency,
+-        status: invoice.status,
+-        createdAt: invoice.createdAt.toISOString(),
+-        customer: customer
+-          ? { id: customer.id, name: customer.name, email: customer.email }
+-          : null,
+-      });
+-    }
++    const data = invoices.map((invoice) => ({
++      id: invoice.id,
++      number: invoice.number,
++      amountCents: invoice.amountCents,
++      currency: invoice.currency,
++      status: invoice.status,
++      createdAt: invoice.createdAt.toISOString(),
++      customer: invoice.customer
++        ? { id: invoice.customer.id, name: invoice.customer.name, email: invoice.customer.email }
++        : null,
++    }));
+ 
+     const total = await this.prisma.invoice.count();
+ 
+diff -ruN a/test/invoices.service.spec.ts b/test/invoices.service.spec.ts
+--- a/test/invoices.service.spec.ts	1970-01-01 07:00:00
++++ b/test/invoices.service.spec.ts	2026-08-20 19:50:17
+@@ -0,0 +1,19 @@
++import { describe, expect, it, vi } from 'vitest';
++import { InvoicesService } from '../src/invoices/invoices.service';
++
++describe('InvoicesService.list', () => {
++  it('calls findMany once with include', async () => {
++    const prisma: any = {
++      invoice: {
++        findMany: vi.fn().mockResolvedValue([]),
++        count: vi.fn().mockResolvedValue(0),
++      },
++    };
++    const service = new InvoicesService(prisma);
++    await service.list({});
++    expect(prisma.invoice.findMany).toHaveBeenCalledTimes(1);
++    expect(prisma.invoice.findMany).toHaveBeenCalledWith(
++      expect.objectContaining({ include: { customer: true } }),
++    );
++  });
++});

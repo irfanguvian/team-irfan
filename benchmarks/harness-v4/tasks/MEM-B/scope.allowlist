@@ -1,0 +1,4 @@
+src/customers/**
+src/common/**
+prisma/**
+test/**

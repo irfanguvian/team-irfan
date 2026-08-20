@@ -1,0 +1,4 @@
+src/reports/**
+src/common/**
+prisma/**
+test/**

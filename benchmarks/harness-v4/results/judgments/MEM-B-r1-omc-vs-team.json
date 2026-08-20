@@ -1,0 +1,11 @@
+{
+  "task": "MEM-B",
+  "round": "1",
+  "arms": [
+    "omc",
+    "team"
+  ],
+  "winner": "omc",
+  "passes": "1|2|X",
+  "judge_model": "claude-opus-5"
+}
