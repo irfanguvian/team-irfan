@@ -9,3 +9,6 @@ runs/*/
 runs/results.csv
 
 runs/results-*.csv
+
+# per-run driver/score logs quote agent output; the csv is the record
+runs/*.log
