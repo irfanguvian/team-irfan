@@ -33,6 +33,14 @@ build_configs() {
     for arm in bare omc team; do
       printf '%s' "$creds" | jq '{claudeAiOauth}' > "$H/configs/$arm/.credentials.json"
       chmod 600 "$H/configs/$arm/.credentials.json"
+      # Claude Code >= 2.1.238 reads macOS creds from a per-config-dir Keychain
+      # item, "Claude Code-credentials-<sha256(dir)[0:8]>", and ignores the file.
+      # Write both. Refresh-token rotation in one arm can invalidate the others'
+      # copy; if a lane dies with "OAuth session expired", rerun --configs.
+      suffix=$(printf '%s' "$H/configs/$arm" | shasum -a 256 | cut -c1-8)
+      security add-generic-password -U -a "$USER" -s "Claude Code-credentials-$suffix" \
+        -w "$(printf '%s' "$creds" | jq -c '{claudeAiOauth}')" >/dev/null 2>&1 \
+        || echo "warning: could not write Keychain item for $arm" >&2
     done
   else
     echo "warning: no Keychain credentials found — arms will not authenticate" >&2
