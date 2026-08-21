@@ -1,6 +1,5 @@
 ---
 node: evaluation
-model: opus
 input: every run directory — `.team-irfan/runs/*/` in the project (current) plus `~/.claude/team-graph/runs/*/` (legacy, pre-2026-08-18)
 output: `docs/eval/<date>-team-irfan.md` + proposed diffs, one at a time
 budget: ≤15 tool calls

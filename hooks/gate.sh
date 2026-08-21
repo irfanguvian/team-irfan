@@ -267,6 +267,76 @@ if [ -n "${TG_RUN:-}" ] && [ -f "$TC" ]; then
   echo "gate: test-case scan ok ($TC)"
 fi
 
+# ------------------------------------------ 5c. contract + index diff guards
+
+# The 2026-08-21 sonnet-low matrix lost six C5 pairs to two defects a review
+# prompt never caught, because guardrails/SKILL.md went unread on the FAST
+# path: a fix that deleted a decorator or an error-response literal (a silent
+# contract break, §182-187), and a new filter/sort shipped with
+# prisma/schema.prisma untouched (§133). Both are visible in the diff, so the
+# gate reads the diff instead of asking anyone to remember the rule.
+
+run_diff() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  # `-- .` keeps a nested project root (a fixture inside a bigger repo) from
+  # gating on its parent's changes.
+  [ -n "${TG_BASE:-}" ] && git diff "$TG_BASE"...HEAD -- . 2>/dev/null
+  git diff HEAD -- . 2>/dev/null
+  git ls-files --others --exclude-standard 2>/dev/null | while IFS= read -r f; do
+    [ -n "$f" ] && git diff --no-index -- /dev/null "$f" 2>/dev/null
+  done
+}
+
+DIFF=$(run_diff)
+
+if [ -z "$DIFF" ]; then
+  echo "gate: contract + index guards skipped (empty diff)"
+else
+  # What the run claims, in the artifacts a human actually reads: the run's own
+  # markdown (plan included — an INTENTIONAL BREAKING is only valid if the
+  # approved plan already declares it), the handoff, and the last commit message.
+  GATED=$( { [ -n "${TG_RUN:-}" ] && cat "$TG_RUN"/*.md
+             cat .team-irfan/handoffs/*.md
+             git log -1 --format=%B
+           } 2>/dev/null )
+
+  if ! grep -q '^INTENTIONAL BREAKING:' <<< "$GATED"; then
+    BREAKS=$(awk '
+      /^\+\+\+ / { next }
+      /^--- /    { f = substr($0, 7); next }
+      /^-/       { if ($0 ~ /@HttpCode\(/ || $0 ~ /ok:[ \t]*false/)
+                     printf "%s: %s\n", f, substr($0, 2) }
+    ' <<< "$DIFF")
+    if [ -n "$BREAKS" ]; then
+      echo "$BREAKS" | show
+      echo "guardrails §182-187: a contract-carrying line is not deleted in passing."
+      echo "Restore it, or declare 'INTENTIONAL BREAKING: <what>' in the plan/report —"
+      echo "valid only when the approved plan already says so."
+      fail "contract line removed without INTENTIONAL BREAKING"
+    fi
+  fi
+
+  if ! grep -qF 'index checked:' <<< "$GATED"; then
+    IDX=$(awk '
+      /^--- /    { next }
+      /^\+\+\+ / { f = substr($0, 7); next }
+      /^\+/      { if (f ~ /(^|\/)src\/.*\.ts$/ &&
+                       (($0 ~ /(^|[^A-Za-z0-9_])in:[ \t]*/ && f ~ /\.(service|repository)\.ts$/) \
+                        || $0 ~ /orderBy/))
+                     printf "%s: %s\n", f, substr($0, 2) }
+    ' <<< "$DIFF")
+    if [ -n "$IDX" ] && ! changed_files | grep -q 'prisma/schema\.prisma'; then
+      echo "$IDX" | show
+      echo "guardrails §133: every WHERE / ORDER BY column is indexed, with the"
+      echo "migration in the same change — prisma/schema.prisma is untouched here."
+      echo "Add the index, or record 'index checked: <which existing index covers it>'."
+      fail "new filter/sort without a schema change"
+    fi
+  fi
+
+  echo "gate: contract + index guards ok"
+fi
+
 # ------------------------------------------------------- 6. mutation smoke
 
 # Opt-in (TG_MUTATE=1) because it re-runs the suite once per source file. The

@@ -1,6 +1,5 @@
 ---
 node: product
-model: opus
 input: the task + the run directory path from the orchestrator (+ <run>/challenge.md on a revision round)
 output: <run>/plan.md + <run>/plan.json
 budget: ≤12 tool calls

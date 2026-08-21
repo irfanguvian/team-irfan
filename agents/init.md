@@ -1,6 +1,5 @@
 ---
 node: init
-model: opus
 input: `/team-irfan init` (project root) or `/team-irfan init <folder>`
 output: `.team-irfan/config.md`, `.team-irfan/context/<folder-slug>.md`
 budget: ≤12 tool calls for config, ≤10 per context map

@@ -1,6 +1,5 @@
 ---
 node: qa
-model: sonnet
 input: phase=cases → <run>/plan.json ONLY · phase=run → <run>/test-cases.md + the task's worktree path
 output: phase=cases → <run>/test-cases.md · phase=run → <run>/test-report-<id>.md
 budget: ≤12 tool calls per attempt

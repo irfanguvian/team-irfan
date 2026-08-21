@@ -1,6 +1,5 @@
 ---
 node: executor
-model: sonnet
 input: your `### Task T<id>` block from <run>/plan.md + your worktree path (+ a failure block, on a retry)
 output: <run>/change-summary-<id>.md, committed work in your worktree
 budget: ≤15 tool calls per attempt

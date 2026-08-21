@@ -1,6 +1,5 @@
 ---
 node: router
-model: opus
 input: the raw task string from `/team-irfan <task>`
 output: a printed route decision, then either an answer or a delegation
 budget: 4 tool calls. Triage is reading, not working.

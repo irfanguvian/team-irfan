@@ -1,6 +1,5 @@
 ---
 node: lead-challenger
-model: opus
 input: the merged diff + <run>/plan.json — NOT Lead's report.md (blind re-review)
 output: <run>/challenge-lead.md · verdict PASS | BLOCKED
 budget: ≤5 tool calls — the diff, plan.json, context maps; never trees

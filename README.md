@@ -50,8 +50,10 @@ headless driver (`hooks/headless-driver.sh` — auto-approve sessions only:
 blocks turn-end until the routed run's terminal artifact exists), the
 SessionStart bench sentinel (`hooks/bench-sentinel.sh` — auto-approve sessions
 only: writes `.tg-bench/plugin-loaded` so a benchmark can prove the plugin was
-loaded instead of trusting the transcript), and the
-memory hooks
+loaded instead of trusting the transcript), the PreToolUse model pin
+(`hooks/model-pin.sh` — auto-approve sessions only: rejects a `Task` call that
+carries a `model` parameter, so a benchmark arm measures the model it names),
+and the memory hooks
 (`hooks/memory.sh` on SubagentStop/Stop for ingest, SessionStart for the
 compiled-view load). Every hook stays **inert without a `.tg-active` marker**
 in the working directory, exactly as in the manual install below — installing

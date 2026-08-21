@@ -1,6 +1,5 @@
 ---
 node: solo-executor
-model: sonnet
 input: the task string, routed FAST by the router
 output: the change in the current tree + a 4-question report
 budget: ≤15 tool calls end to end, router's calls included

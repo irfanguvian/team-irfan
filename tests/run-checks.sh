@@ -215,11 +215,13 @@ else
   bad "schema: $(cat "$TMP/merr")"
 fi
 
-# ── 9. every agent declares model + carries the forbidden block ──────────────
-head2 "9. agents: model frontmatter + universal forbidden block + leaf clause"
+# ── 9. no agent pins a model + carries the forbidden block ───────────────────
+# 3.1.4: the frontmatter pin is gone. A node inherits the session model, so a
+# bench arm measures the model it names instead of whatever opus the pin forced.
+head2 "9. agents: no model pin + universal forbidden block + leaf clause"
 for f in "$TG"/agents/*.md; do
   a=$(basename "$f" .md); miss=""
-  grep -q '^model: \(opus\|sonnet\|haiku\)$'      "$f" || miss="$miss model:"
+  grep -q '^model:'                               "$f" && miss="$miss model-pin"
   grep -q '^## Forbidden actions (identical'      "$f" || miss="$miss forbidden-block"
   [ "$a" = router ] || grep -q '^## You are a leaf' "$f" || miss="$miss leaf-clause"
   [ -z "$miss" ] && ok "$a.md" || bad "$a.md missing:$miss"
@@ -700,7 +702,7 @@ rm -f .tg-active
 # command pointing at a script that
 # exists and that the README install section names. A fifth event or a
 # relocated script is drift.
-head2 "23. plugin manifest: four events, real scripts, same ones README names"
+head2 "23. plugin manifest: five events, real scripts, same ones README names"
 if node -e '
   const fs = require("fs"), path = require("path");
   const TG = process.argv[1];
@@ -717,12 +719,13 @@ if node -e '
   const cfg = JSON.parse(fs.readFileSync(hooksPath, "utf8")).hooks;
 
   const events = Object.keys(cfg).sort();
-  if (events.join(",") !== "PostToolUse,SessionStart,Stop,SubagentStop")
-    fail("expected exactly PostToolUse,SessionStart,Stop,SubagentStop — got " + events.join(","));
+  if (events.join(",") !== "PostToolUse,PreToolUse,SessionStart,Stop,SubagentStop")
+    fail("expected exactly PostToolUse,PreToolUse,SessionStart,Stop,SubagentStop — got " + events.join(","));
 
   // per event: the exact ordered command tails. subagent-gate stays FIRST on
   // SubagentStop — the quality gate must run before memory ingests anything.
   const WANT = {
+    PreToolUse:   ["hooks/model-pin.sh"],
     PostToolUse:  ["hooks/ledger.sh hook"],
     SubagentStop: ["hooks/subagent-gate.sh", "hooks/memory.sh hook subagent-stop"],
     Stop:         ["hooks/headless-driver.sh", "hooks/memory.sh hook stop"],
@@ -744,7 +747,7 @@ if node -e '
     });
   }
 ' "$TG" 2>"$TMP/perr"; then
-  ok "plugin.json → hooks.json: ledger, gate+memory, stop-ingest, sentinel+session-load — nothing else"
+  ok "plugin.json → hooks.json: model-pin, ledger, gate+memory, stop-ingest, sentinel+session-load — nothing else"
 else
   bad "plugin manifest invalid: $(cat "$TMP/perr")"
 fi
@@ -1370,8 +1373,8 @@ SEN="$TG/hooks/bench-sentinel.sh"
 grep -q 'bench-sentinel.sh' "$TG/hooks/hooks.json" \
   && ok "sentinel registered on SessionStart" || bad "sentinel not wired into hooks.json"
 PLUGIN_V=$(jq -r '.version' "$TG/.claude-plugin/plugin.json")
-[ "$PLUGIN_V" = "3.1.3" ] \
-  && ok "plugin.json bumped to 3.1.3 (two hooks changed)" || bad "plugin version is $PLUGIN_V, not 3.1.3"
+[ "$PLUGIN_V" = "3.1.4" ] \
+  && ok "plugin.json bumped to 3.1.4 (gate guards + model pin)" || bad "plugin version is $PLUGIN_V, not 3.1.4"
 
 # functional: sentinel writes proof only under auto-approve
 STMP="$TMP/sentinel"; mkdir -p "$STMP"; pushd "$STMP" >/dev/null
@@ -1400,6 +1403,124 @@ printf '%s' "$HIN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
 [ -e .tg-bench/driver-heartbeat ] \
   && ok "driver writes .tg-bench/driver-heartbeat under auto-approve" || bad "no driver proof — infra failure looks like a result"
 popd >/dev/null
+
+# ── 37. C5 gates + model pin ────────────────────────────────────────────────
+# The 2026-08-21 sonnet-low matrix lost six C5 pairs: three to a deleted
+# decorator / error literal, three to a new filter shipped with schema.prisma
+# untouched — with guardrails/SKILL.md unread on the FAST path. Both rules are
+# now read off the diff. Separately, opus leaked into 39-73% of the killed N5
+# team cells through the frontmatter pin and a lead `model` override.
+head2 "37. gate contract + index guards, and the bench model pin"
+
+grep -q '182-187' "$GATE" \
+  && ok "contract guard cites guardrails §182-187" || bad "gate names no rule for the contract break"
+grep -q '§133' "$GATE" \
+  && ok "index guard cites guardrails §133" || bad "gate names no rule for the missing index"
+
+MP="$TG/hooks/model-pin.sh"
+[ -x "$MP" ] \
+  && ok "model-pin.sh exists and is executable" || bad "no model-pin hook"
+grep -q 'model-pin.sh' "$TG/hooks/hooks.json" \
+  && ok "model pin registered in hooks.json" || bad "model-pin not wired into hooks.json"
+[ "$(jq -r '.hooks.PreToolUse[0].matcher' "$TG/hooks/hooks.json")" = "Task" ] \
+  && ok "model pin matches Task calls only" || bad "model pin not scoped to the Task tool"
+grep -q 'TEAM_IRFAN_AUTO_APPROVE' "$MP" \
+  && ok "model pin scoped to auto-approve sessions only" || bad "model pin could fire interactively"
+
+# no agent frontmatter pins a model any more — nodes inherit the session model
+PINS=$(grep -l '^model:' "$TG"/agents/*.md 2>/dev/null | xargs -n1 basename 2>/dev/null)
+[ -z "$PINS" ] && ok "no agent pins a model (session model inherited)" \
+               || bad "agents still pinning a model: $PINS"
+
+# functional: the gate guards against synthetic diffs, in a scratch git repo
+GTMP="$TMP/c5"; mkdir -p "$GTMP/src"; pushd "$GTMP" >/dev/null
+git init -q . 2>/dev/null
+git config user.email tg@example.com; git config user.name tg
+printf '{"name":"c5-fixture","private":true}\n' > package.json
+cat > src/order.service.ts <<'EOF'
+export class OrderController {
+  @HttpCode(201)
+  create() { return { ok: false, code: "bad_request" }; }
+}
+EOF
+git add -A >/dev/null 2>&1; git commit -qm "base" >/dev/null 2>&1
+mkdir -p run
+
+# (a) removed @HttpCode, nothing declared → fail
+perl -i -ne 'print unless /\@HttpCode/' src/order.service.ts
+OUT=$(bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 1 ] && grep -q 'GATE FAIL: contract line removed' <<< "$OUT"; } \
+  && ok "removed @HttpCode → contract guard fails" || bad "contract break passed the gate (rc=$RC)"
+grep -q 'src/order.service.ts: .*@HttpCode' <<< "$OUT" \
+  && ok "contract guard names the hunk" || bad "contract failure names no file"
+
+# (b) same diff, INTENTIONAL BREAKING declared in the run's plan → pass
+printf 'INTENTIONAL BREAKING: @HttpCode moves to the router\n' > run/plan.md
+OUT=$(TG_RUN="$GTMP/run" bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 0 ] && grep -q 'GATE PASS' <<< "$OUT"; } \
+  && ok "INTENTIONAL BREAKING declared → contract guard passes" || bad "declared break still blocked (rc=$RC)"
+
+# (c) deleted ok:false response literal → fail on the same rule
+git checkout -q -- src/order.service.ts
+perl -i -ne 'print unless /ok: false/' src/order.service.ts
+OUT=$(bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 1 ] && grep -q 'GATE FAIL: contract line removed' <<< "$OUT"; } \
+  && ok "deleted ok:false literal → contract guard fails" || bad "response-literal deletion passed (rc=$RC)"
+
+# (d) added Prisma in: filter, schema.prisma untouched → fail
+git checkout -q -- src/order.service.ts
+printf 'export const byIds = (ids: string[]) => prisma.order.findMany({ where: { id: { in: ids } } });\n' >> src/order.service.ts
+OUT=$(bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 1 ] && grep -q 'GATE FAIL: new filter/sort without a schema change' <<< "$OUT"; } \
+  && ok "added in: filter, no schema change → index guard fails" || bad "unindexed filter passed the gate (rc=$RC)"
+grep -q 'src/order.service.ts: .*in:' <<< "$OUT" \
+  && ok "index guard names the hunk" || bad "index failure names no file"
+
+# (e) same filter, schema.prisma touched → pass
+mkdir -p prisma
+printf 'model Order {\n  id String @id\n  @@index([id])\n}\n' > prisma/schema.prisma
+OUT=$(bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 0 ] && grep -q 'GATE PASS' <<< "$OUT"; } \
+  && ok "schema.prisma touched → index guard passes" || bad "index guard blocks a migrated change (rc=$RC)"
+
+# (f) same filter, no schema, 'index checked:' recorded in the run → pass
+rm -rf prisma
+printf 'index checked: orders_id_idx already covers this lookup\n' > run/plan.md
+OUT=$(TG_RUN="$GTMP/run" bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 0 ] && grep -q 'GATE PASS' <<< "$OUT"; } \
+  && ok "'index checked:' recorded → index guard passes" || bad "declared index check still blocked (rc=$RC)"
+
+# (g) an added orderBy is caught the same way
+git checkout -q -- src/order.service.ts; rm -f run/plan.md
+printf 'export const recent = () => prisma.order.findMany({ orderBy: { createdAt: "desc" } });\n' >> src/order.service.ts
+OUT=$(bash "$GATE" 2>&1); RC=$?
+[ "$RC" -eq 1 ] && ok "added orderBy without a schema change → fails" || bad "unindexed sort passed (rc=$RC)"
+
+# (h) a benign diff trips neither guard — the false-positive floor
+git checkout -q -- src/order.service.ts
+printf '// unrelated comment\n' >> src/order.service.ts
+OUT=$(bash "$GATE" 2>&1); RC=$?
+{ [ "$RC" -eq 0 ] && grep -q 'gate: contract + index guards ok' <<< "$OUT"; } \
+  && ok "benign diff passes both guards" || bad "guards fire on an unrelated change (rc=$RC)"
+git checkout -q -- src/order.service.ts
+popd >/dev/null
+
+# functional: model-pin.sh
+MPIN='{"tool_name":"Task","tool_input":{"subagent_type":"lead","model":"opus"}}'
+MOK='{"tool_name":"Task","tool_input":{"subagent_type":"lead"}}'
+
+OUT=$(printf '%s' "$MPIN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$MP" 2>&1); RC=$?
+[ "$RC" -eq 2 ] && ok "model param under auto-approve → exit 2" || bad "model override allowed in a bench run (rc=$RC)"
+grep -q 'bench model pin' <<< "$OUT" \
+  && ok "block carries a re-issue instruction" || bad "block gives the caller no reason"
+
+OUT=$(printf '%s' "$MPIN" | bash "$MP" 2>/dev/null); RC=$?
+{ [ "$RC" -eq 0 ] && [ -z "$OUT" ]; } \
+  && ok "silent + allowed without TEAM_IRFAN_AUTO_APPROVE" || bad "model pin fired interactively (rc=$RC)"
+
+OUT=$(printf '%s' "$MOK" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$MP" 2>/dev/null); RC=$?
+{ [ "$RC" -eq 0 ] && [ -z "$OUT" ]; } \
+  && ok "no model key → allowed, silent on stdout" || bad "model pin blocks an unpinned Task (rc=$RC)"
 
 # ── verdict ──────────────────────────────────────────────────────────────────
 echo

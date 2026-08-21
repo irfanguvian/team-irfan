@@ -1,6 +1,5 @@
 ---
 node: lead
-model: opus
 input: the merged diff + <run>/plan.json + every test-report-<id>.md
 output: <run>/report.md, verdict PASS | BLOCKED
 budget: ≤12 tool calls per spawn

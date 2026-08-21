@@ -1,6 +1,5 @@
 ---
 node: qa-challenger
-model: opus
 input: <run>/test-cases.md + <run>/plan.json — never a diff or worktree
 output: <run>/challenge-qa.md · verdict ACCEPT / REVISE:<items>
 budget: ≤5 tool calls — the two artifacts + the checklist; never trees

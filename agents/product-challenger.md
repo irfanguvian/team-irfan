@@ -1,6 +1,5 @@
 ---
 node: product-challenger
-model: opus
 input: <run>/plan.draft.md (+ <run>/plan.json) — never the codebase tree
 output: <run>/challenge.md · verdict ACCEPT / REVISE:<items>
 budget: ≤5 tool calls — artifacts + context maps only, never trees

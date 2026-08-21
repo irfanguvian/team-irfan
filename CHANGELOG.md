@@ -5,6 +5,45 @@ project's.
 
 ---
 
+## 3.1.4 — 2026-08-21
+
+The 2026-08-21 sonnet-low matrix (`docs/evaluations/2026-08-21-harness-v4-sonnet-low.md`)
+put a number on two things prose had been asking for and not getting. C5 lost
+six pairs: three to a fix that quietly removed a contract-carrying line, three
+to a new filtered query shipped with `prisma/schema.prisma` untouched — in
+every case with `skills/guardrails/SKILL.md` unread, because the FAST path
+never opens it. Separately, opus leaked into 39–73% of the N5 team cells the
+run then had to kill, so the arm measured a model it did not name. All three
+fixes here are deterministic; none of them retunes a prompt.
+
+- **`hooks/gate.sh` contract guard.** The gate now reads the run's diff. A
+  removed line carrying `@HttpCode(` or an `ok: false` response literal fails
+  the gate, naming the file and the hunk and citing guardrails §182-187. The
+  only way past is `INTENTIONAL BREAKING: <what>` in the run's own markdown,
+  the handoff, or the commit message — and §182-187 already limits that to a
+  break the approved plan declares.
+- **`hooks/gate.sh` index guard.** An added line in a `src/**` TypeScript file
+  introducing a Prisma `in:` filter (in a `.service.ts` / `.repository.ts`) or
+  an `orderBy`, while `prisma/schema.prisma` is untouched, fails the gate
+  citing guardrails §133. Escape hatch: `index checked: <which existing index
+  covers it>` in the same artifacts. Both guards are line-based and scoped to
+  the project root, so a fixture nested inside a larger repo does not gate on
+  its parent's changes.
+- **New `hooks/model-pin.sh`, on PreToolUse with matcher `Task`.** Under
+  `TEAM_IRFAN_AUTO_APPROVE=1` only, a `Task` call carrying a `model` parameter
+  exits 2 and tells the caller to re-issue it without one. The other half of
+  the same leak is gone too: **no agent contract pins a model any more** — the
+  `model:` frontmatter line is removed from all eleven `agents/*.md`, so every
+  node inherits the session model. Interactive sessions are unaffected; the
+  hook is silent and exits 0 outside a bench run.
+- Checks: new section 37 drives both gate guards against synthetic diffs in a
+  scratch git repo (fail without the declaration, pass with it, pass when the
+  schema is touched, and a benign diff that trips neither) plus the three
+  model-pin exit paths. Section 9 now asserts the *absence* of a model pin, and
+  section 23 pins the manifest at five events.
+
+---
+
 ## 3.1.3 — 2026-08-21
 
 The 2026-08-20 opus matrix produced a headline the addendum then contradicted:
