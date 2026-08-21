@@ -6,10 +6,25 @@ Grep by tag: `FEAT:` `MOD:` `STATUS:` `DEC:`
 ## Index
 | Feature | Modules | Latest | Status |
 |---|---|---|---|
-| bench-harness-v4 | benchmarks,hooks | R-0004 | shipped |
+| bench-harness-v4 | benchmarks,hooks | R-0005 | shipped |
 | harness-v3 benchmark | benchmarks/harness-v3, hooks | R-0001 | partial |
 
 ## Entries
+
+### R-0005 · 2026-08-21 · [FEAT:bench-harness-v4] [MOD:benchmarks,hooks,agents,plugin] [STATUS:shipped] [DEC:yes]
+
+**Input**
+Phase 3+4 of harness-v4 plan: run sonnet-low matrix unattended, evaluate,
+feed P0s back into team-irfan.
+
+**Output**
+- files: `benchmarks/harness-v4/results/sonnet-low/` (45 cells, REPORT-20260821.md), `docs/evaluations/2026-08-21-harness-v4-sonnet-low.md`, `hooks/{gate.sh,model-pin.sh}`, agents frontmatter de-pinned, plugin 3.1.4, run-checks §37. Commits 3903144(run sha)…42e6a45, 93d307d.
+- change: 43 valid/2 infra (N5 team, budget $3 cap). C1 HOLDS · C2/C3 INSUFFICIENT DATA · C4 HOLDS · C5 FALSIFIED (6 pairwise losses). P0s shipped: gate contract+index guards, bench model pin (opus leak was 39–73% of killed cells).
+- decision: budget-killed cells stay INFRA_FAIL, no retry (recorded rounds only); prompt tuning deferred below n=5 — only deterministic gates shipped.
+- tests: run-checks 354/354 incl. §37; matrix ran start→report unattended in 43 min, $22.29.
+
+**Verdict**
+shipped — rerun N5 team with CELL_BUDGET_USD=6 --redo-infra=budget to fill C2/C3; fresh full sonnet matrix measures the new gates on C5; haiku floor queued after.
 
 ### R-0004 · 2026-08-21 · [FEAT:bench-harness-v4] [MOD:benchmarks,hooks,plugin] [STATUS:shipped] [DEC:yes]
 
