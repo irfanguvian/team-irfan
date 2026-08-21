@@ -23,11 +23,19 @@
 # stop_hook_active is deliberately ignored: this is a driver, not a gate — it
 # must keep pushing across turns. The per-session counter caps it at 25 blocks
 # so a wedged run still terminates instead of looping forever.
+#
+# Under auto-approve it also touches .tg-bench/driver-heartbeat in cwd — on-disk
+# proof for the harness that the hook was loaded and ran at all.
 
 set -uo pipefail
 
 [ "${TEAM_IRFAN_AUTO_APPROVE:-}" = "1" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
+
+# Proof this driver ran at all. score.sh reads it: a transcript that routed
+# FULL/FAST with no heartbeat means the hook never fired, so the cell measured
+# an unhooked run, not a team-graph one. Best-effort, never fails the hook.
+mkdir -p .tg-bench 2>/dev/null && { [ -e .tg-bench/driver-heartbeat ] || : > .tg-bench/driver-heartbeat; } 2>/dev/null
 
 INPUT=$(cat 2>/dev/null)
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)

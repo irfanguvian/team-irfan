@@ -726,7 +726,7 @@ if node -e '
     PostToolUse:  ["hooks/ledger.sh hook"],
     SubagentStop: ["hooks/subagent-gate.sh", "hooks/memory.sh hook subagent-stop"],
     Stop:         ["hooks/headless-driver.sh", "hooks/memory.sh hook stop"],
-    SessionStart: ["hooks/memory.sh hook session-start"],
+    SessionStart: ["hooks/bench-sentinel.sh", "hooks/memory.sh hook session-start"],
   };
   const readme = fs.readFileSync(path.join(TG, "README.md"), "utf8");
   for (const [event, tails] of Object.entries(WANT)) {
@@ -744,7 +744,7 @@ if node -e '
     });
   }
 ' "$TG" 2>"$TMP/perr"; then
-  ok "plugin.json → hooks.json: ledger, gate+memory, stop-ingest, session-load — nothing else"
+  ok "plugin.json → hooks.json: ledger, gate+memory, stop-ingest, sentinel+session-load — nothing else"
 else
   bad "plugin manifest invalid: $(cat "$TMP/perr")"
 fi
@@ -1357,6 +1357,48 @@ mktr '"ROUTE: FULL\nstall"'
 rm -rf .team-irfan; mkdir -p .team-irfan/.driver; echo 25 > .team-irfan/.driver/drv-test.count
 printf '%s' "$IN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
 [ $? -eq 0 ] && ok "block cap reached → allowed (no infinite loop)" || bad "driver can loop forever"
+popd >/dev/null
+
+# ── 36. bench sentinel + driver heartbeat ──────────────────────────────────
+# The 2026-08-20 opus matrix scored 6 team cells whose plugin never loaded —
+# nothing on disk contradicted the numbers. Both hooks now leave proof the
+# harness checks deterministically instead of trusting the transcript.
+head2 "36. bench sentinel + driver heartbeat"
+SEN="$TG/hooks/bench-sentinel.sh"
+[ -x "$SEN" ] \
+  && ok "bench-sentinel.sh exists and is executable" || bad "no bench sentinel"
+grep -q 'bench-sentinel.sh' "$TG/hooks/hooks.json" \
+  && ok "sentinel registered on SessionStart" || bad "sentinel not wired into hooks.json"
+PLUGIN_V=$(jq -r '.version' "$TG/.claude-plugin/plugin.json")
+[ "$PLUGIN_V" = "3.1.3" ] \
+  && ok "plugin.json bumped to 3.1.3 (two hooks changed)" || bad "plugin version is $PLUGIN_V, not 3.1.3"
+
+# functional: sentinel writes proof only under auto-approve
+STMP="$TMP/sentinel"; mkdir -p "$STMP"; pushd "$STMP" >/dev/null
+CLAUDE_PLUGIN_ROOT="$TG" bash "$SEN" >/dev/null 2>&1
+[ ! -e .tg-bench/plugin-loaded ] \
+  && ok "sentinel silent without TEAM_IRFAN_AUTO_APPROVE" || bad "sentinel fires interactively"
+
+TEAM_IRFAN_AUTO_APPROVE=1 CLAUDE_PLUGIN_ROOT="$TG" bash "$SEN" >/dev/null 2>&1
+[ -s .tg-bench/plugin-loaded ] \
+  && ok "sentinel writes .tg-bench/plugin-loaded under auto-approve" || bad "no plugin-load proof written"
+[ "$(jq -r '.version' .tg-bench/plugin-loaded 2>/dev/null)" = "$PLUGIN_V" ] \
+  && ok "proof records the loaded plugin version" || bad "plugin-loaded version disagrees with plugin.json"
+popd >/dev/null
+
+# functional: driver leaves a heartbeat on the same terms
+HTMP="$TMP/heartbeat"; mkdir -p "$HTMP"; pushd "$HTMP" >/dev/null
+HTR="$HTMP/tr.jsonl"
+printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ROUTE: FAST\"}]}}" > "$HTR"
+HIN="{\"transcript_path\":\"$HTR\",\"session_id\":\"hb-test\"}"
+
+printf '%s' "$HIN" | bash "$DRV" >/dev/null 2>&1
+[ ! -e .tg-bench/driver-heartbeat ] \
+  && ok "driver leaves no heartbeat interactively" || bad "driver wrote bench state outside a bench run"
+
+printf '%s' "$HIN" | TEAM_IRFAN_AUTO_APPROVE=1 bash "$DRV" >/dev/null 2>&1
+[ -e .tg-bench/driver-heartbeat ] \
+  && ok "driver writes .tg-bench/driver-heartbeat under auto-approve" || bad "no driver proof — infra failure looks like a result"
 popd >/dev/null
 
 # ── verdict ──────────────────────────────────────────────────────────────────

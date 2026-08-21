@@ -47,7 +47,10 @@ ledger — in one step, no `settings.json` editing. In Claude Code:
 The manifest is `.claude-plugin/plugin.json` → `hooks/hooks.json`. It wires
 the SubagentStop quality gate, the PostToolUse ledger, the Stop-side
 headless driver (`hooks/headless-driver.sh` — auto-approve sessions only:
-blocks turn-end until the routed run's terminal artifact exists), and the
+blocks turn-end until the routed run's terminal artifact exists), the
+SessionStart bench sentinel (`hooks/bench-sentinel.sh` — auto-approve sessions
+only: writes `.tg-bench/plugin-loaded` so a benchmark can prove the plugin was
+loaded instead of trusting the transcript), and the
 memory hooks
 (`hooks/memory.sh` on SubagentStop/Stop for ingest, SessionStart for the
 compiled-view load). Every hook stays **inert without a `.tg-active` marker**

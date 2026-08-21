@@ -13,14 +13,23 @@ actually built for, and defines in advance what result would falsify each one.
 
 - Mode B headless, plan gate auto-approved for arm C (say so in every report).
 - Prompt text read from `tasks/<T>/PROMPT.md`, passed identically to all arms.
-- **Sequential only.** One cell at a time, always. No parallel rounds — v3's
-  parallel rounds are the thing that kept failing. `run.sh` refuses a second
-  concurrent invocation (lockfile).
+- **Sequential within an arm; arms may run as parallel lanes** — one lane per
+  arm, own worktree, own lockfile, own results dir; never two cells in one arm
+  concurrently; MEM session A must complete and write its retro before session B
+  starts in that lane. Cross-lane `wall_s` is marked concurrent-load in the
+  report. [^lanes]
 - Resumable: `bin/status.sh` prints what ran and the exact next command.
   Every cell writes its result atomically before the next cell starts, so a
   crash loses at most one cell.
 - Reuse the v3 fixture (NestJS + Prisma invoices app). v4 adds modules to it;
   it does not add a second repo.
+
+[^lanes]: (amended 2026-08-21 — codifies the per-arm lane topology that ran the
+    MEM cells on 2026-08-20). The original rule read "Sequential only. One cell
+    at a time, always." v3's parallel *rounds within one arm* are the thing that
+    kept failing; one lane per arm is not that, and it is what actually ran. A
+    lockfile per lane (`runs/<tier>/.lock-<lane>`) still refuses a second
+    concurrent invocation of the same lane.
 
 ---
 
@@ -196,24 +205,91 @@ All from Claude Code's JSON output; one `bin/extract.py`, zero LLM:
 ```
 benchmarks/harness-v4/
   tasks/{Q1,F1,N5,B1,MEM-A,MEM-B}/PROMPT.md + hidden/ + scope.allowlist
+                          (+ MEM-B/bandaid.markers — the same-hole grep patterns)
   fixture-patches/        additive modules for N5/B1/MEM on top of v3 fixture
   judge/{prompt.md, calibration/}
-  bin/{init.sh, run.sh, extract.py, score.sh, judge.sh, report.py, status.sh}
-  runs/  results/
+  bin/{init.sh, lib.sh, preflight.sh, run.sh, extract.py, score.sh,
+       same-hole.sh, judge.sh, report.py, progress.sh, notify.sh, status.sh}
+  selftest/fake-claude    the shim bin/selftest.sh runs instead of a real claude
+  runs/<tier>/  results/<tier>/
 ```
 
-- `run.sh <task> <arm> <round>` runs exactly one cell. `run.sh all` iterates
-  cells **strictly sequentially**, fastest tasks first, and writes each result
-  before starting the next. A lockfile makes a second invocation refuse to
-  start. There is no parallel mode to misuse.
-- `MAX_TURNS=150`, `MAX_SEC=2700` per cell, as v3. A cell that hits either is
-  scored (`status: capped`), not discarded — hitting the cap IS the C3 result.
+**Tiers.** One tier = one `(model, effort)` pair — `sonnet-low`, `haiku-low`.
+Each tier owns `runs/<tier>/` and `results/<tier>/` so two matrices never
+collide. `BENCH_TIER` (or `BENCH_MODEL` + `BENCH_EFFORT`) selects it; the
+pre-tier opus files stay where they are and are read as `--tier opus-legacy`.
+
+- `run.sh <task> <arm> <round>` still runs exactly one cell.
+- **`run.sh --matrix [--lanes N] [--tasks ..] [--arms ..] [--expect-sha ..]`**
+  is the supervised entry point: it runs preflight, writes
+  `results/<tier>/matrix.json`, spawns **one detached lane per arm** (default
+  `--lanes 3`; `--lanes 1` = strict sequential), waits on the lanes, then chains
+  `score.sh all` → `judge.sh all` → `same-hole.sh` → `report.py` and writes
+  `results/<tier>/DONE` (naming the report) or `ABORTED` (with a reason).
+  Each lane holds its own `runs/<tier>/.lock-<lane>` and logs to
+  `runs/<tier>/lane-<lane>.log`; `--lanes N` splits the arms round-robin.
+- **Crash-resume via the ledger.** Every cell end appends one line to
+  `results/<tier>/ledger.jsonl` `{ts,task,arm,round,status,reason,cost_usd,wall_sec}`.
+  Re-running `--matrix` skips any cell that has a `result.json` **or** an
+  `INFRA_FAIL` meta — an infra cell is never silently rerun, it is reported.
+  `--redo-infra[=<reason-substring>]` is the deliberate override: it reruns
+  those cells once the cause is fixed, moving each old cell dir aside to
+  `<cell>.infra-<ts>/` so the failed attempt stays auditable.
+- **An abort still scores and still reports.** A lane that dies ends the matrix
+  with `ABORTED` and a non-zero exit, but `score.sh` → `judge.sh` →
+  `same-hole.sh` → `report.py` run regardless: cells that completed stay on the
+  record. Aborting is a signal about the run, never a reason to discard data.
+- **Preflight**, before cell 1 and (for the team arm) again after each cell
+  exits: `hooks/doctor.sh` must PASS · a one-turn `--effort` smoke call per arm
+  config must return valid JSON · `judge.sh --calibrate` must be all-correct ·
+  the team arm's worktree must contain a `.tg-bench/plugin-loaded` sentinel
+  whose `version` equals the repo's `plugin.json` version. Failure of the
+  post-cell sentinel check is `INFRA_FAIL reason=plugin-load-failed`, and the
+  rest of that lane's team cells are written `lane-aborted:plugin-load-failed`
+  with `cost_usd=0` and no process spawned — symmetric counts, zero spend.
+  Selftest-only escapes: `BENCH_SKIP_PIN` / `BENCH_SKIP_CALIBRATE` / `BENCH_SKIP_SMOKE`.
+- **Pin what is measured.** `--expect-sha <sha>` (default `git rev-parse HEAD`).
+  The matrix refuses to start if the tree is dirty (ignoring `runs/**` and
+  `results/**`), if HEAD ≠ expect-sha, or if the *installed* plugin's
+  `gitCommitSha`/`version` disagree with the repo. It refuses **before** any
+  `runs/<task>` directory is created. `meta.json` and every CSV row carry
+  `git_sha, plugin_version, model, effort, tier, session_id` so a row can never
+  be traced to the wrong build, plus `cost_source` ∈ `result|watch` — whether
+  that row's cost is the session's own authoritative total or the budget
+  watcher's approximation, which is all a killed cell leaves behind.
+- **Driver heartbeat.** The team arm's Stop hook touches
+  `.tg-bench/driver-heartbeat` on its first fire. A transcript containing
+  `ROUTE: FULL|FAST` with no heartbeat file means the plugin's driver never ran:
+  `validity=infra reason=driver-absent`, `false_done` forced `false`.
+- **Three-state cells: `PASS | FAIL | INFRA_FAIL`.** `INFRA_FAIL` means the
+  harness broke, not the arm — plugin never loaded, driver absent, budget kill,
+  auth/rate-limit. INFRA cells are **excluded from every C1–C5 computation** and
+  listed separately with their reason. `PASS` iff `pass_rate == 1`; everything
+  else the arm did is `FAIL`.
+- **Budget guard.** `CELL_BUDGET_USD` and `MAX_SEC` per cell; a watcher prices
+  the live transcript against `pricing.json` and `kill -TERM`s an overrun →
+  `INFRA_FAIL reason=budget` (wall overrun: `budget(wall)`). This is the one
+  place a spend cap and a *result* are deliberately separated: `MAX_TURNS=150`
+  is **not** infra — a cell that hits the turn cap is scored `capped(turns)`,
+  because hitting the turn cap IS the C3 result.
+- **Same-hole is deterministic, not judged.** `bin/same-hole.sh <arm> <round>`
+  greps `tasks/MEM-B/bandaid.markers` over MEM-B's `diff.txt` and every
+  `Edit`/`Write` tool input in its transcript, and writes
+  `results/<tier>/same-hole/<arm>-r<round>.json {same_hole,hits,retro_recorded}`.
+  Zero LLM. The judge keeps only the blind pairwise C5 review.
 - MEM cells are the one exception to fresh-worktree-per-cell: the pair shares
   one clone per (arm, round), created by `run.sh` for MEM-A and reused by
   MEM-B, then destroyed.
-- `report.py` prints the five hypotheses with verdicts (`holds / falsified /
-  insufficient data`), the per-task table, and the pairwise-review win matrix.
-  Cost and wall appear in the table footer, unscored, with one line of context.
+- **Never poll a model.** `results/<tier>/PROGRESS.md` is rewritten after every
+  cell (`bin/progress.sh`) and `bin/notify.sh` pushes to `TEAM_IRFAN_NOTIFY_URL`
+  (or appends to `notifications.log` when unset). The operator starts one
+  process and reads files.
+- `report.py --tier <tier>` prints a per-arm `valid | infra | total` header and
+  the infra cells with reasons, then the five hypotheses with verdicts
+  (`holds / falsified / INSUFFICIENT DATA`), the per-task table, and the
+  pairwise-review win matrix, and writes `results/<tier>/REPORT-<date>.md`.
+  Cost and wall appear in the table footer, unscored, with one line of context —
+  and marked concurrent-load when the matrix ran with `--lanes > 1`.
 
 ---
 
@@ -231,6 +307,8 @@ benchmarks/harness-v4/
   run the sonnet tier before concluding anything.
 - n per cell is 2–3. Direct run review is valid at any n; aggregate tuning
   of team-irfan itself stays blocked below n=5, as in v3.
+- INFRA_FAIL cells are excluded from every verdict and listed with reason; a
+  verdict is INSUFFICIENT DATA below the SPEC round counts.
 
 ---
 

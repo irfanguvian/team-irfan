@@ -5,6 +5,34 @@ project's.
 
 ---
 
+## 3.1.3 — 2026-08-21
+
+The 2026-08-20 opus matrix produced a headline the addendum then contradicted:
+the plugin silently failed to load in 6 of the FULL team cells, so those cells
+measured a plain Claude session and scored as a team-graph result. Nothing on
+disk disagreed with them, which is the actual defect — infra health was being
+inferred from transcripts. It is now a file a script writes.
+
+- **New `hooks/bench-sentinel.sh`, on SessionStart.** Auto-approve sessions
+  only: writes `.tg-bench/plugin-loaded` (`{version, root, ts}`) in the session
+  cwd, taken from the loaded plugin's own `plugin.json`. The harness compares it
+  against the repo version and marks a disagreeing or missing cell
+  `INFRA_FAIL reason=plugin-load-failed` instead of scoring it. Zero LLM, silent
+  on stdout, always exits 0; interactive sessions leave no trace.
+- **`hooks/headless-driver.sh` leaves a heartbeat** — `.tg-bench/driver-heartbeat`,
+  touched once under auto-approve before any route parsing. A transcript that
+  routed FULL/FAST with no heartbeat means the Stop hook never fired, which the
+  scorer reads as `driver-absent` rather than as a persistence failure. All
+  existing driver behaviour is unchanged.
+- Part of the harness-v4 hardening pass: preflight, run pinning to a commit and
+  plugin version, three-state cells (`PASS | FAIL | INFRA_FAIL`), and the
+  never-stale supervisor land in the same commit — see
+  `benchmarks/harness-v4/SPEC.md` and `.omc/plans/harness-v4-hardening.md`.
+- Checks: section 36 pins both hooks, including functional tests that the proof
+  files appear under `TEAM_IRFAN_AUTO_APPROVE=1` and only there.
+
+---
+
 ## 3.1.2 — 2026-08-20
 
 The 2026-08-20 haiku matrix (results/2026-08-20-haiku-v3-routerfix) showed the

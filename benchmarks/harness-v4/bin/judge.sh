@@ -1,33 +1,30 @@
 #!/usr/bin/env bash
-# Pairwise, blind, order-swapped quality review (claim C5) + the MEM same-hole
-# check (claim C4). The only script besides run.sh that spends money.
+# Pairwise, blind, order-swapped quality review (claim C5). The only script
+# besides run.sh that spends money — and the only place in the harness where an
+# LLM is asked anything at all. The C4 same-hole check is a grep now, in
+# bin/same-hole.sh.
 #
 #   judge.sh --calibrate                    gate: 3 planted pairs, both orders each.
 #                                           A judge that misses any is not used.
-#   judge.sh pair <task> <round> <X> <Y>    judge runs/<task>/{X,Y}/<round>/diff.txt
+#   judge.sh pair <task> <round> <X> <Y>    judge $RUNS/<task>/{X,Y}/<round>/diff.txt
 #   judge.sh all                            every task/round/pairing with two diffs
-#   judge.sh same-hole <arm> <round>        did MEM-B fall into the known hole?
+#                                           (a pairing touching an INFRA_FAIL cell
+#                                           is skipped — unspendable evidence)
+#
+# Diffs come from the tier's runs/ tree and judgments land in the tier's
+# results/judgments/ (BENCH_TIER, see lib.sh).
 #
 # The judge never sees arm names, transcripts, or costs. Every pairing is judged
 # twice with presentation order swapped; a flip between the two passes is
 # recorded as tie (position bias kill). One judge model for the whole matrix:
-# JUDGE_MODEL, default claude-opus-5.
+# JUDGE_MODEL, default claude-opus-5. The binary is $CLAUDE_BIN (lib.sh), so a
+# fake-claude matrix never reaches a paid judge at matrix end.
 set -uo pipefail
 
-H="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BENCH_ROOT="${BENCH_ROOT:-$HOME/team-irfan-bench-v4}"
+# shellcheck source=lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 JUDGE_MODEL="${JUDGE_MODEL:-claude-opus-5}"
 MAX_DIFF_LINES=400
-
-die() { echo "judge.sh: $*" >&2; exit 1; }
-
-base_tag() {
-  case "$1" in
-    Q1) echo q1-base ;; F1) echo f1-base ;; N5) echo n5-base ;;
-    B1) echo b1-base ;; MEM-A|MEM-B) echo mem-base ;;
-    *) die "unknown task $1" ;;
-  esac
-}
 
 clip() { head -n "$MAX_DIFF_LINES"; }
 
@@ -45,7 +42,7 @@ PY
 )
   local rawf; rawf=$(mktemp)
   CLAUDE_CONFIG_DIR="$H/configs/bare" \
-    claude -p --output-format json --model "$JUDGE_MODEL" --max-turns 1 \
+    "$CLAUDE_BIN" -p --output-format json --model "$JUDGE_MODEL" --max-turns 1 \
       --mcp-config "$H/configs/bare/mcp-empty.json" --strict-mcp-config \
       <<< "$prompt" > "$rawf" 2>/dev/null
   python3 - "$rawf" <<'PY'
@@ -123,7 +120,19 @@ calibrate() {
 # ------------------------------------------------------------------ real pair
 judge_real() {
   local task=$1 round=$2 x=$3 y=$4
-  local dx="$H/runs/$task/$x/$round/diff.txt" dy="$H/runs/$task/$y/$round/diff.txt"
+  # An infra cell measured the harness, not the arm: report.py drops any
+  # judgment touching one, so buying it would be spending on evidence that
+  # cannot count.
+  local a st
+  for a in "$x" "$y"; do
+    st=$(jq -r '.status // ""' "$(cell_dir "$task" "$a" "$round")/meta.json" 2>/dev/null || echo "")
+    if [ "$st" = INFRA_FAIL ]; then
+      echo "skip $task r$round $x-vs-$y (infra: $a)"; return 0
+    fi
+  done
+  local dx dy
+  dx="$(cell_dir "$task" "$x" "$round")/diff.txt"
+  dy="$(cell_dir "$task" "$y" "$round")/diff.txt"
   [ -s "$dx" ] || { echo "skip $task r$round $x-vs-$y (no diff for $x)"; return 0; }
   [ -s "$dy" ] || { echo "skip $task r$round $x-vs-$y (no diff for $y)"; return 0; }
   [ -d "$BENCH_ROOT/.git" ] || die "no fixture repo — bin/init.sh first"
@@ -143,59 +152,12 @@ judge_real() {
   final=${verdict##*|}
   case "$final" in X) winner=$x ;; Y) winner=$y ;; *) winner=$final ;; esac
 
-  mkdir -p "$H/results/judgments"
+  mkdir -p "$RES/judgments"
   jq -n --arg t "$task" --arg r "$round" --arg x "$x" --arg y "$y" \
         --arg w "$winner" --arg passes "$verdict" --arg model "$JUDGE_MODEL" \
     '{task:$t,round:$r,arms:[$x,$y],winner:$w,passes:$passes,judge_model:$model}' \
-    > "$H/results/judgments/$task-r$round-$x-vs-$y.json"
+    > "$RES/judgments/$task-r$round-$x-vs-$y.json"
   echo "[$task r$round] $x vs $y -> $winner  ($verdict)"
-}
-
-# ------------------------------------------------------------------ same-hole
-same_hole() {
-  local arm=$1 round=$2
-  local out="$H/runs/MEM-B/$arm/$round"
-  [ -s "$out/diff.txt" ] || die "no MEM-B diff for $arm/$round — score it first"
-  local sid jsonl cmds
-  sid=$(jq -r '.session_id // ""' "$out/result.json" 2>/dev/null)
-  jsonl=$(find "$H/configs/$arm/projects" -name "$sid.jsonl" 2>/dev/null | head -1)
-  cmds=$(mktemp)
-  if [ -n "$jsonl" ]; then
-    jq -r 'select(.type=="assistant") | .message.content[]? |
-           select(.type=="tool_use") | "\(.name): \(.input.command // .input.file_path // "")"' \
-      "$jsonl" 2>/dev/null | head -200 > "$cmds"
-  else
-    echo "(transcript unavailable)" > "$cmds"
-  fi
-
-  local prompt raw
-  prompt=$(python3 - "$H/judge/same-hole.md" "$cmds" "$out/diff.txt" <<'PY'
-import sys
-tpl, cmds, diff = [open(p).read() for p in sys.argv[1:4]]
-sys.stdout.write(tpl.replace('{COMMANDS}', cmds).replace('{DIFF}', diff[:40000]))
-PY
-)
-  rm -f "$cmds"
-  raw=$(CLAUDE_CONFIG_DIR="$H/configs/bare" \
-    claude -p --output-format json --model "$JUDGE_MODEL" --max-turns 1 \
-      --mcp-config "$H/configs/bare/mcp-empty.json" --strict-mcp-config \
-      <<< "$prompt" 2>/dev/null)
-  mkdir -p "$H/results/judgments"
-  printf '%s' "$raw" | python3 - "$arm" "$round" "$H/results/judgments" <<'PY'
-import json, re, sys
-arm, rnd, outdir = sys.argv[1:4]
-try:
-    result = json.load(sys.stdin).get("result", "")
-    m = re.search(r'\{.*\}', result, re.S)
-    v = json.loads(m.group(0)) if m else {}
-except Exception:
-    v = {}
-rec = {"arm": arm, "round": rnd,
-       "same_hole": v.get("same_hole"), "evidence": v.get("evidence", "")}
-path = f"{outdir}/same-hole-{arm}-{rnd}.json"
-json.dump(rec, open(path, "w"), indent=2)
-print(f"[same-hole {arm} r{rnd}] {rec['same_hole']} — {rec['evidence']}")
-PY
 }
 
 # ------------------------------------------------------------------ dispatch
@@ -203,22 +165,15 @@ case "${1:-}" in
   --calibrate) calibrate ;;
   pair) [ $# -eq 5 ] || die "usage: judge.sh pair <task> <round> <armX> <armY>"
         judge_real "$2" "$3" "$4" "$5" ;;
-  same-hole) [ $# -eq 3 ] || die "usage: judge.sh same-hole <arm> <round>"
-             same_hole "$2" "$3" ;;
   all)
     for task in F1 N5 B1 MEM-A MEM-B; do
       for round in 1 2 3; do
-        [ -d "$H/runs/$task" ] || continue
+        [ -d "$RUNS/$task" ] || continue
         judge_real "$task" "$round" bare team
         judge_real "$task" "$round" omc team
         judge_real "$task" "$round" bare omc
       done
     done
-    for arm in bare omc team; do
-      for round in 1 2 3; do
-        [ -s "$H/runs/MEM-B/$arm/$round/diff.txt" ] && same_hole "$arm" "$round"
-      done
-    done
     ;;
-  *) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

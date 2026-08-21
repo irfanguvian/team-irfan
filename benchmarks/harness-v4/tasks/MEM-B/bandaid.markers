@@ -1,0 +1,39 @@
+# Band-aid markers for the MEM N+1 bug class (claim C4, bin/same-hole.sh).
+#
+# The bug class: the correct fix REMOVES the per-row query (one findMany /
+# joined read). The band-aid family LEAVES the loop and tunes around it — add
+# an index, add a cache, or fan the same per-row queries out in parallel. This
+# list replaces the LLM same-hole judgment that used to live in
+# judge/same-hole.md (deleted 2026-08-21); the definition now lives here.
+#
+# One extended regex per line; `#` comments and blank lines ignored. CODE ONLY:
+# matched against (a) lines ADDED in MEM-B's diff and (b) the new content of
+# every Edit/Write/MultiEdit under src/ or prisma/ in MEM-B's transcript
+# (intermediate attempts count). Comment-only lines are stripped first — talking
+# about a cache is not adding one. Prose artifacts (.team-irfan/**, *.md) are
+# never matched here; that is retro_recorded's separate channel.
+#
+# Verified 0 hits across every fixture .ts (base correct fixes, mem seeded, n5,
+# ref, b1) and a hit on `private cache = new Map()` — bin/same-hole.sh's check.
+# Residual risk: prisma/schema.prisma already carries four @@index lines, so a
+# wholesale rewrite of that file through Write would match even with no index
+# added. The diff channel (added lines only) is unaffected.
+
+# index the loop instead of removing it
+@@index
+createIndex|CREATE +INDEX
+
+# cache the loop instead of removing it — anchored to a cache being CREATED,
+# not to the word appearing
+new [A-Za-z]*Cache|import .*[Cc]ache|\.cache\s*[.(=]|@Cache|CacheModule|cache-manager|\b[Cc]ache[A-Za-z]*\s*[:=]
+[Rr]edis|REDIS
+\bttl\b|\bTTL\b
+
+# parallelise the loop instead of removing it — still one query per row
+Promise\.all\(.*\.map\(
+
+# drop to raw SQL around the loop. NOTE: a raw joined/aggregate query can also
+# be a legitimate root-cause fix; kept per review call 2026-08-21, so a MEM-B
+# cell flagged only by this marker deserves a look at hits_code before it is
+# read as a band-aid.
+\$queryRaw

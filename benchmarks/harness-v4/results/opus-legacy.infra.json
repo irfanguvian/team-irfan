@@ -1,0 +1,11 @@
+{
+  "note": "opus tier deprioritized for the cheap-model thesis; see REPORT-20260820.md addendum. This sidecar exists because results.csv predates the validity column (v4 hardening, 2026-08-21) and must stay byte-identical — the infra verdicts are recorded here instead of being backfilled into the record.",
+  "cells": [
+    {"task": "N5",    "arm": "team", "round": "1", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"},
+    {"task": "N5",    "arm": "team", "round": "2", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"},
+    {"task": "MEM-A", "arm": "team", "round": "1", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"},
+    {"task": "MEM-A", "arm": "team", "round": "2", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"},
+    {"task": "MEM-B", "arm": "team", "round": "1", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"},
+    {"task": "MEM-B", "arm": "team", "round": "2", "reason": "plugin-load-failed (3.0.0 manifest hooks ref; no headless driver)"}
+  ]
+}

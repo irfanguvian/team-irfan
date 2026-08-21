@@ -8,3 +8,13 @@ runs/
 
 # pricing.json is copied from harness-v3 by init.sh
 pricing.json
+
+# results/<tier>/ IS the durable record — results.csv, ledger.jsonl, matrix.json,
+# PROGRESS.md, REPORT-*.md, judgments/ and same-hole/ all stay committed.
+# Only the supervisor's scratch is ignored:
+results/*/notify.pending
+results/*/.notify-last
+results/*/.progress.lock/
+results/*/.phase
+__pycache__/
+results/*/.notify.lock/

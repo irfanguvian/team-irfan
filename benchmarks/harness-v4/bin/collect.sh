@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Turns one finished run into numbers. Reads only files on disk; spawns nothing.
 #
-#   collect.sh T1 bare 1   ->  json on stdout
+#   collect.sh T1 bare 1   ->  json on stdout   (cell dir per BENCH_TIER)
 #
 # Primary cost is `total_cost_usd` straight out of Claude Code's own JSON result,
 # which already prices whatever model mix the run used — including an arm C run's
@@ -9,12 +9,26 @@
 # pricing.json; if the two disagree by much, trust the first and fix the second.
 set -uo pipefail
 
-H="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 task=$1 arm=$2 round=$3
-out="$H/runs/$task/$arm/$round"
+out="$(cell_dir "$task" "$arm" "$round")"
 res="$out/result.json"
 
-[ -s "$res" ] || { echo '{"error":"no result.json"}'; exit 0; }
+# An INFRA_FAIL cell may have no result.json at all: a lane abort never spawned
+# a process, a budget kill never let it print. score.sh still writes it a row.
+# Cost then falls back to the watcher's running estimate in meta (0 for a lane
+# abort, the real spend for a budget kill) — approximate, and the only number
+# that exists once the process was killed before it could report.
+if [ ! -s "$res" ]; then
+  jq -n --slurpfile meta "$out/meta.json" '
+    ($meta[0] // {}) as $M
+    | ($M.cost_usd_watch // 0) as $c
+    | {cost_usd:$c, cost_recomputed_usd:$c, tokens_in:0, tokens_out:0,
+       cache_read:0, cache_write:0, tool_calls:0, num_turns:0,
+       wall_sec: ($M.wall_sec // 0), models: [], session_id: ($M.session_id // "")}'
+  exit 0
+fi
 
 sid=$(jq -r '.session_id // ""' "$res")
 jsonl=$(find "$H/configs/$arm/projects" -name "$sid.jsonl" 2>/dev/null | head -1)
