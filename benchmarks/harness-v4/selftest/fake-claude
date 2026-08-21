@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# A fake `claude` for bin/selftest.sh. Never talks to the API, never reads a
+# credential — it only writes the files a real session would leave behind, so the
+# supervisor's checks (sentinel, heartbeat, budget watcher, transcript scan) have
+# something real to read.
+#
+#   CLAUDE_BIN=selftest/fake-claude bin/run.sh --matrix ...
+#
+# It parses the flags run.sh actually passes and ignores everything else.
+#
+# env knobs (all optional):
+#   FAKE_CLAUDE_MODE   ok | slow | spend | rc          default ok
+#   FAKE_SCENARIO      file whose first line is the mode (beats the env var)
+#   FAKE_NO_SENTINEL=1 skip .tg-bench/plugin-loaded    -> plugin-load-failed
+#   FAKE_NO_HEARTBEAT=1 skip .tg-bench/driver-heartbeat -> driver-absent
+#   FAKE_PLUGIN_VERSION  sentinel version, default = repo .claude-plugin/plugin.json
+#   FAKE_ROUTE         FULL | FAST | none              default FAST
+#   FAKE_LINES         assistant lines in the transcript, default 4
+#   FAKE_USAGE_OUT     output tokens per line, default 200
+#   FAKE_COST          total_cost_usd in the result,   default 0.01
+#   FAKE_SLEEP         seconds, slow/spend modes,      default 5
+#   FAKE_PATCH         executable run with cwd as $1, so score.sh sees a diff
+#   FAKE_EDITS         'path::new_string' entries joined by '|', emitted as Edit
+#                      tool_use lines — what same-hole.sh's transcript channel reads
+set -uo pipefail
+
+MODE="${FAKE_CLAUDE_MODE:-ok}"
+[ -n "${FAKE_SCENARIO:-}" ] && [ -r "$FAKE_SCENARIO" ] && MODE=$(head -1 "$FAKE_SCENARIO")
+
+SID="" MODEL="" EFFORT="" MAX_TURNS=0 SMOKE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --session-id) SID="${2:-}"; shift 2 ;;
+    --model)      MODEL="${2:-}"; shift 2 ;;
+    --effort)     EFFORT="${2:-}"; shift 2 ;;
+    --max-turns)  MAX_TURNS="${2:-0}"; shift 2 ;;
+    # variadic or valued flags we accept and drop
+    --output-format|--permission-mode|--mcp-config|--append-system-prompt|--tier)
+      shift 2 ;;
+    *) shift ;;   # -p, --strict-mcp-config, anything new: ignored on purpose
+  esac
+done
+: "${SID:=fake-$$}" "${MODEL:=claude-sonnet-5}" "${EFFORT:=low}"
+
+PROMPT=$(cat)   # run.sh feeds the prompt on stdin; a real claude would too
+# The smoke call is one turn with a trivial prompt. Answer it and stop — no
+# sentinel, no transcript, nothing for a later check to trip over.
+case "$MAX_TURNS:$PROMPT" in
+  1:*) SMOKE=1 ;;
+esac
+
+emit() {  # $1 = result text, $2 = cost
+  jq -nc --arg s "$SID" --arg r "$1" --argjson c "${2:-0}" \
+     --argjson d "$(( ${SECONDS:-0} * 1000 + 1 ))" \
+     '{session_id:$s,total_cost_usd:$c,num_turns:3,duration_ms:$d,result:$r}'
+}
+
+[ "$SMOKE" = 1 ] && { emit "ok" 0; exit 0; }
+
+# ------------------------------------------------------------------- sentinels
+# The real ones come from hooks/bench-sentinel.sh (SessionStart) and
+# hooks/headless-driver.sh (Stop), both gated on TEAM_IRFAN_AUTO_APPROVE=1.
+H="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$H/../.." && pwd)"
+
+plugin_version() {
+  [ -n "${FAKE_PLUGIN_VERSION:-}" ] && { echo "$FAKE_PLUGIN_VERSION"; return; }
+  jq -r '.version // "0.0.0"' "$REPO/.claude-plugin/plugin.json" 2>/dev/null || echo 0.0.0
+}
+
+if [ "${TEAM_IRFAN_AUTO_APPROVE:-}" = 1 ] && [ "${FAKE_NO_SENTINEL:-}" != 1 ]; then
+  mkdir -p .tg-bench
+  jq -nc --arg v "$(plugin_version)" --arg r "$REPO" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '{version:$v,root:$r,ts:$t}' > .tg-bench/plugin-loaded
+  [ "${FAKE_NO_HEARTBEAT:-}" != 1 ] && touch .tg-bench/driver-heartbeat
+fi
+
+# ------------------------------------------------------------------ transcript
+# Claude Code slugs the cwd into the projects dir name: / -> -.
+write_transcript() {
+  [ -n "${CLAUDE_CONFIG_DIR:-}" ] || return 0
+  local dir="$CLAUDE_CONFIG_DIR/projects/${PWD//\//-}"
+  mkdir -p "$dir" || return 0
+  local route="${FAKE_ROUTE:-FAST}" lines="${FAKE_LINES:-4}" out="${FAKE_USAGE_OUT:-200}"
+  local head="working."
+  [ "$route" != none ] && head="ROUTE: $route"
+  local i
+  {
+    for i in $(seq 1 "$lines"); do
+      local text="$head step $i"
+      [ "$i" = "$lines" ] && text="Done. Verdict: shipped"
+      jq -nc --arg m "$MODEL" --arg t "$text" --argjson o "$out" \
+        '{type:"assistant",message:{model:$m,
+          usage:{input_tokens:1000,output_tokens:$o,
+                 cache_read_input_tokens:0,cache_creation_input_tokens:0},
+          content:[{type:"text",text:$t}]}}'
+    done
+    # Edit tool_use lines: same-hole.sh reads .input.file_path + .input.new_string
+    local e n=0
+    while IFS= read -r e; do
+      [ -n "$e" ] || continue
+      n=$((n + 1))
+      jq -nc --arg m "$MODEL" --arg id "e$n" \
+             --arg p "${e%%::*}" --arg s "${e#*::}" \
+        '{type:"assistant",message:{model:$m,
+          usage:{input_tokens:10,output_tokens:10,
+                 cache_read_input_tokens:0,cache_creation_input_tokens:0},
+          content:[{type:"tool_use",id:$id,name:"Edit",
+                    input:{file_path:$p,old_string:"",new_string:$s}}]}}'
+    done <<< "${FAKE_EDITS:+$(tr '|' '\n' <<< "$FAKE_EDITS")}"
+  } > "$dir/$SID.jsonl"
+}
+
+apply_patch() {
+  [ -n "${FAKE_PATCH:-}" ] && [ -x "$FAKE_PATCH" ] && "$FAKE_PATCH" "$PWD" >/dev/null 2>&1
+  return 0
+}
+
+# ----------------------------------------------------------------------- modes
+case "$MODE" in
+  rc)
+    echo "API Error: rate limit exceeded (429)" >&2
+    exit 1 ;;
+
+  spend)
+    # Usage lands BEFORE the sleep so the budget watcher has something to price
+    # on its first 20s tick. TERM from the watcher must look like a kill, not a
+    # clean finish — 143 is what a real claude would exit with.
+    FAKE_USAGE_OUT="${FAKE_USAGE_OUT:-5000000}" write_transcript
+    apply_patch
+    trap 'exit 143' TERM
+    # ponytail: 1s granularity so the trap fires promptly; watcher ticks at 20s
+    for _ in $(seq 1 "${FAKE_SLEEP:-120}"); do sleep 1; done
+    emit "Done." "${FAKE_COST:-9.99}"
+    exit 0 ;;
+
+  slow)
+    trap 'exit 143' TERM
+    for _ in $(seq 1 "${FAKE_SLEEP:-5}"); do sleep 1; done
+    write_transcript; apply_patch
+    emit "Done. Verdict: shipped" "${FAKE_COST:-0.01}"
+    exit 0 ;;
+
+  ok|*)
+    write_transcript; apply_patch
+    emit "Done. Verdict: shipped" "${FAKE_COST:-0.01}"
+    exit 0 ;;
+esac
