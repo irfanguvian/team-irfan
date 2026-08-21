@@ -75,6 +75,7 @@ installed_plugin()    { jq -r ".plugins[\"team-irfan@team-irfan\"][0].$1 // \"\"
                           "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; }
 GIT_SHA="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo "")"
 PLUGIN_VERSION="$(installed_plugin version)"
+PLUGIN_SHA="$(installed_plugin gitCommitSha)"
 
 emit_meta() {  # path task arm round status reason wall worktree sid started ended cost
   jq -n --arg task "$2" --arg arm "$3" --arg round "$4" --arg status "$5" \
@@ -82,10 +83,10 @@ emit_meta() {  # path task arm round status reason wall worktree sid started end
         --arg session_id "$9" --arg started_at "${10}" --arg ended_at "${11}" \
         --argjson cost_usd_watch "${12}" \
         --arg git_sha "$GIT_SHA" --arg plugin_version "$PLUGIN_VERSION" \
-        --arg model "$MODEL" --arg effort "$EFFORT" --arg tier "$TIER" '
+        --arg plugin_sha "$PLUGIN_SHA" --arg model "$MODEL" --arg effort "$EFFORT" --arg tier "$TIER" '
     {task:$task,arm:$arm,round:$round,status:$status,reason:$reason,
      wall_sec:$wall_sec,worktree:$worktree,git_sha:$git_sha,
-     plugin_version:$plugin_version,model:$model,effort:$effort,tier:$tier,
+     plugin_version:$plugin_version,plugin_sha:$plugin_sha,model:$model,effort:$effort,tier:$tier,
      session_id:$session_id,started_at:$started_at,ended_at:$ended_at,
      cost_usd_watch:$cost_usd_watch}' > "$1.tmp" && mv "$1.tmp" "$1"
 }
@@ -458,8 +459,19 @@ $dirty
   isha=$(installed_plugin gitCommitSha)
   [ -n "$ivers" ] || die "team-irfan plugin is not installed
   fix: claude plugin install team-irfan@team-irfan"
-  [ "$isha" = "$head" ] || die "installed plugin sha $isha != HEAD $head
-  fix: claude plugin update team-irfan@team-irfan"
+  # The installed cache is what Claude loads; the bench scripts run from the
+  # working tree. A HEAD that differs from the cache only under benchmarks/,
+  # docs/, tests/ (and the repo README/CHANGELOG) loads byte-identical plugin
+  # code, so it is measured as the same plugin — both shas go in meta.json.
+  if [ "$isha" != "$head" ]; then
+    git -C "$REPO" diff --quiet "$isha" "$head" -- . \
+        ':(exclude)benchmarks' ':(exclude)docs' ':(exclude)tests' \
+        ':(exclude)README.md' ':(exclude)CHANGELOG.md' 2>/dev/null \
+      || die "installed plugin sha $isha != HEAD $head and plugin paths differ
+  fix: claude plugin update team-irfan@team-irfan  (bump plugin.json if the version is unchanged)"
+    echo "pin: installed plugin sha $isha != HEAD $head; plugin paths identical — ok"
+  fi
+  PLUGIN_SHA="$isha"
   [ "$ivers" = "$rvers" ] || die "installed plugin version $ivers != plugin.json $rvers
   fix: claude plugin update team-irfan@team-irfan"
   PLUGIN_VERSION="$ivers"
