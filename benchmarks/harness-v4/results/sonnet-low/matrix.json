@@ -1,0 +1,27 @@
+{
+  "started_at": "2026-08-21T02:22:46Z",
+  "tier": "sonnet-low",
+  "git_sha": "39031440efe6fa1d66106fee4ba62486e1b78d4b",
+  "plugin_version": "3.1.3",
+  "model": "claude-sonnet-5",
+  "effort": "low",
+  "lanes": 3,
+  "arms": [
+    "bare",
+    "omc",
+    "team"
+  ],
+  "tasks": [
+    "Q1",
+    "F1",
+    "B1",
+    "N5",
+    "MEM-A",
+    "MEM-B"
+  ],
+  "cell_budget_usd": 3,
+  "max_sec": 1200,
+  "judge_model": "claude-opus-5",
+  "expect_sha": "39031440efe6fa1d66106fee4ba62486e1b78d4b",
+  "pid": 35762
+}

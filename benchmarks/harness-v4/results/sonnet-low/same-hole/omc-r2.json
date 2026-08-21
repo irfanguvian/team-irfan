@@ -1,0 +1,19 @@
+{
+  "arm": "omc",
+  "round": "2",
+  "same_hole": true,
+  "hits_code": [
+    {
+      "marker": "@@index",
+      "where": "diff",
+      "line": "@@index([customerId, occurredAt])"
+    },
+    {
+      "marker": "@@index",
+      "where": "transcript",
+      "line": "@@index([customerId, occurredAt])"
+    }
+  ],
+  "retro_recorded": false,
+  "method": "script"
+}

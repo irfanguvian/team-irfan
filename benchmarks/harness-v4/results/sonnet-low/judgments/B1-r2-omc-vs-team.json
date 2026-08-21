@@ -1,0 +1,11 @@
+{
+  "task": "B1",
+  "round": "2",
+  "arms": [
+    "omc",
+    "team"
+  ],
+  "winner": "tie",
+  "passes": "1|tie|tie",
+  "judge_model": "claude-opus-5"
+}
